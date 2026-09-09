@@ -1,0 +1,65 @@
+[package]
+name = "trofeo_lcd"
+version = "0.1.0"
+edition = "2021"
+description = "Program sederhana untuk mengirim framebuffer ke Thermalright Trofeo Vision 9.16 LCD (protokol LY, USB 0416:5408), berdasarkan reverse-engineering dari thermalright-trcc-linux"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+jpeg-encoder = "0.5"
+# Dipakai HANYA untuk jalanin runtime async minimal buat client OpenRGB
+# (openrgb2), bukan buat program secara keseluruhan (loop utama tetap sync).
+# "rt", "net", "time" cukup — tidak perlu "full".
+openrgb2 = "0.3"
+rusb = { version = "0.9", features = ["vendored"] }
+rustfft = "6.4.1"
+sysinfo = { version = "0.30", default-features = false }
+thiserror = "1.0"
+tokio = { version = "1", features = ["rt", "net", "time"] }
+
+[target."cfg(windows)".dependencies]
+wasapi = "0.24.0"
+# Dipakai untuk GPU usage (PDH), network & disk IO (IP Helper / DeviceIoControl),
+# volume master (IAudioEndpointVolume/COM), judul lagu/media yang sedang
+# diputar (System Media Transport Controls, WinRT), dan deteksi proses .exe
+# foreground (dipakai untuk mode game, lihat src/foreground.rs). Kalau versi
+# ini tidak ditemukan di crates.io saat build, jalankan `cargo add windows`
+# untuk mengambil versi terbaru yang tersedia — nama modul/fungsi di bawah
+# ini sudah stabil di seri 0.5x/0.6x.
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Performance",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_Security",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Media_Control",
+    "Foundation",
+] }
+
+[target."cfg(target_os = \"linux\")".dependencies]
+# Loopback audio (bar EQ) via PulseAudio ATAU PipeWire+pipewire-pulse — lihat
+# src/audio.rs (device "@DEFAULT_MONITOR@"). Kedua binding ini murni Rust API
+# di atas libpulse-sys (FFI ke libpulse.so, library C yang sudah otomatis ada
+# di hampir semua desktop Linux — bagian dari paket pulseaudio-libs/libpulse0).
+libpulse-binding = "2.28"
+libpulse-simple-binding = "2.28"
+# Deteksi window aktif (X11 EWMH: _NET_ACTIVE_WINDOW + _NET_WM_PID) untuk mode
+# game — lihat src/foreground.rs. Implementasi protokol X11 murni Rust (tidak
+# perlu library C libX11 sama sekali), tapi tetap butuh SERVER X11 nyala (X11
+# native, atau XWayland untuk aplikasi non-native-Wayland). Di sesi Wayland
+# murni, foreground_exe_name() akan selalu None (lihat catatan di file itu).
+x11rb = "0.13"
