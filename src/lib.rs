@@ -44,6 +44,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 mod font;
+pub mod dxgi_capture;
 
 pub const VENDOR_ID: u16 = 0x0416;
 /// Trofeo Vision 9.16 LCD.

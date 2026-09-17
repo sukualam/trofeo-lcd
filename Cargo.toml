@@ -13,6 +13,11 @@ jpeg-encoder = "0.5"
 # (openrgb2), bukan buat program secara keseluruhan (loop utama tetap sync).
 # "rt", "net", "time" cukup — tidak perlu "full".
 openrgb2 = "0.3"
+# Dipakai untuk integrasi DeepCool Digital: kirim data suhu/usage/power CPU ke
+# display device DeepCool (AIO/air cooler/casing) lewat HID — dijalankan di
+# thread background terpisah (lihat src/deepcool/). Driver device di-port dari
+# proyek deepcool-digital-linux (Nortank12) / deepcool-digital-windows.
+hidapi = "2"
 rusb = { version = "0.9", features = ["vendored"] }
 rustfft = "6.4.1"
 sysinfo = { version = "0.30", default-features = false }
@@ -31,6 +36,7 @@ wasapi = "0.24.0"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_System_Performance",
+    "Win32_System_Registry",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Variant",
@@ -46,9 +52,22 @@ windows = { version = "0.58", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
     "Media_Control",
     "Foundation",
 ] }
+
+[[bin]]
+name = "trofeo_lcd"
+path = "src/main.rs"
+
+[[bin]]
+name = "trofeo_screen"
+path = "src/bin/screen.rs"
 
 [target."cfg(target_os = \"linux\")".dependencies]
 # Loopback audio (bar EQ) via PulseAudio ATAU PipeWire+pipewire-pulse — lihat

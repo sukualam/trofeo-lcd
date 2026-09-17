@@ -16,7 +16,9 @@
 //! Tuning cepat lainnya ada di konstanta `NUM_BARS`, `FFT_SIZE`, dll di bawah.
 
 mod audio;
+mod cpu_freq;
 mod cpu_sensor;
+mod deepcool;
 mod foreground;
 mod gpu;
 mod gpu_amd;
@@ -25,6 +27,7 @@ mod netdisk;
 mod openrgb_sync;
 mod pawnio;
 
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::Local;
@@ -132,6 +135,10 @@ enum ColorMode {
 /// Default interval polling warna OpenRGB (lihat `--openrgb-poll-ms`).
 const DEFAULT_OPENRGB_POLL_MS: u64 = 300;
 
+/// Default interval pengiriman data ke display DeepCool (lihat
+/// `--deepcool-update-ms`).
+const DEFAULT_DEEPCOOL_UPDATE_MS: u64 = 1000;
+
 /// Konfigurasi dari argumen command-line (lihat `parse_args`).
 struct Config {
     idle_fps: f32,
@@ -147,10 +154,16 @@ struct Config {
     openrgb_device: Option<String>,
     openrgb_poll_ms: u64,
     /// Kalau `true`, jendela terminal disembunyikan (`FreeConsole`) begitu
-    /// argumen selesai diparse, dan seluruh `println!`/`eprintln!`
-    /// selanjutnya dialihkan ke file log (lihat `hide_console_and_redirect_to_log`).
+    /// argumen selesai diparse — dipakai untuk jalan dari Task Scheduler/
+    /// shortcut tanpa menampilkan jendela. Tidak menulis log ke file manapun.
     /// Hanya berlaku di Windows — di OS lain diabaikan (dengan peringatan).
     hide_console: bool,
+    /// Integrasi DeepCool Digital (kirim data CPU ke display cooler/casing
+    /// DeepCool via HID) — aktif secara default, bisa dimatikan dengan
+    /// `--no-deepcool`.
+    deepcool_enabled: bool,
+    /// Interval pengiriman data ke display DeepCool, ms (dibatasi 100-2000).
+    deepcool_update_ms: u64,
 }
 
 fn print_help() {
@@ -185,13 +198,15 @@ fn print_help() {
          \x20\x20                          efek animasi di device sumber tidak ikut mulus.\n\
          \x20\x20--openrgb-poll-ms <N>     Interval polling OpenRGB dalam ms\n\
          \x20\x20                          (default: {DEFAULT_OPENRGB_POLL_MS})\n\
+         \x20\x20--no-deepcool              Matikan integrasi DeepCool (kirim data CPU ke\n\
+         \x20\x20                          display cooler/casing DeepCool lewat HID).\n\
+         \x20\x20                          Default: AKTIF.\n\
+         \x20\x20--deepcool-update-ms <N>   Interval kirim data ke display DeepCool, ms\n\
+         \x20\x20                          (100-2000; default: {DEFAULT_DEEPCOOL_UPDATE_MS})\n\
          \x20\x20--hide-console            Sembunyikan jendela terminal begitu program\n\
-         \x20\x20                          mulai jalan (log selanjutnya ditulis ke file\n\
-         \x20\x20                          trofeo_lcd.log di folder yang sama dengan .exe,\n\
-         \x20\x20                          bukan ke layar). Cocok dipakai lewat shortcut/\n\
-         \x20\x20                          Task Scheduler saat login. Hanya berlaku di\n\
-         \x20\x20                          Windows; defaultnya (tanpa opsi ini) terminal\n\
-         \x20\x20                          tetap terbuka & log tampil seperti biasa.\n\
+         \x20\x20                          mulai jalan. Cocok dipakai lewat shortcut/\n\
+         \x20\x20                          Task Scheduler saat login. Tidak menulis log\n\
+         \x20\x20                          ke file. Hanya berlaku di Windows.\n\
          \x20\x20-h, --help                Tampilkan bantuan ini"
     );
 }
@@ -267,6 +282,8 @@ fn parse_args() -> anyhow::Result<Config> {
     let mut openrgb_device: Option<String> = None;
     let mut openrgb_poll_ms = DEFAULT_OPENRGB_POLL_MS;
     let mut hide_console = false;
+    let mut deepcool_enabled = true;
+    let mut deepcool_update_ms = DEFAULT_DEEPCOOL_UPDATE_MS;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -297,6 +314,10 @@ fn parse_args() -> anyhow::Result<Config> {
             "--openrgb-poll-ms" => {
                 openrgb_poll_ms = next_u64(&mut args, "--openrgb-poll-ms")?;
             }
+            "--no-deepcool" => deepcool_enabled = false,
+            "--deepcool-update-ms" => {
+                deepcool_update_ms = next_u64(&mut args, "--deepcool-update-ms")?;
+            }
             "--hide-console" => hide_console = true,
             "-h" | "--help" => {
                 print_help();
@@ -314,6 +335,9 @@ fn parse_args() -> anyhow::Result<Config> {
     if openrgb_poll_ms == 0 {
         anyhow::bail!("--openrgb-poll-ms harus > 0");
     }
+    if deepcool_update_ms == 0 {
+        anyhow::bail!("--deepcool-update-ms harus > 0");
+    }
 
     Ok(Config {
         idle_fps,
@@ -324,50 +348,21 @@ fn parse_args() -> anyhow::Result<Config> {
         openrgb_device,
         openrgb_poll_ms,
         hide_console,
+        deepcool_enabled,
+        deepcool_update_ms,
     })
 }
 
-/// Path file log yang dipakai saat `--hide-console` aktif: selalu di folder
-/// yang sama dengan file .exe (bukan CWD saat ini — supaya konsisten dicari
-/// walau program dijalankan dari shortcut/Task Scheduler dengan direktori
-/// kerja yang beda-beda).
+/// Sembunyikan jendela terminal (`FreeConsole`) — jendela hilang, tapi
+/// `stdout`/`stderr` TIDAK dialihkan ke file log (tidak ada file yang
+/// ditulis). HARUS dipanggil sebelum `println!`/`eprintln!` pertama kali
+/// dipakai di program ini, supaya Rust belum sempat "menghafal" handle
+/// konsol lama (stdout/stderr di-cache lazy saat pertama dipakai, sebelum
+/// itu masih bisa dialihkan).
 #[cfg(windows)]
-fn log_file_path() -> anyhow::Result<std::path::PathBuf> {
-    let exe = std::env::current_exe()
-        .map_err(|e| anyhow::anyhow!("gagal menentukan lokasi trofeo_lcd.exe: {e}"))?;
-    Ok(exe.with_file_name("trofeo_lcd.log"))
-}
-
-/// Sembunyikan jendela terminal (`FreeConsole`) & alihkan `stdout`/`stderr`
-/// proses ke file log — HARUS dipanggil sebelum `println!`/`eprintln!`
-/// pertama kali dipakai di program ini, supaya Rust belum sempat
-/// "menghafal" handle konsol lama (stdout/stderr di-cache lazy saat
-/// pertama dipakai, sebelum itu masih bisa dialihkan).
-#[cfg(windows)]
-fn hide_console_and_redirect_to_log() -> anyhow::Result<()> {
-    use std::os::windows::io::AsRawHandle;
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Console::{FreeConsole, SetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
-
-    let path = log_file_path()?;
-    let log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| anyhow::anyhow!("gagal membuka file log '{}': {e}", path.display()))?;
-
-    // Handle file ini dipegang langsung oleh Windows sebagai stdout/stderr
-    // proses setelah SetStdHandle, jadi jangan di-drop (yang akan
-    // menutup/melepas handle-nya) — `forget` supaya tetap hidup selama
-    // proses berjalan.
-    let raw_handle = HANDLE(log_file.as_raw_handle() as _);
-    std::mem::forget(log_file);
-
-    unsafe {
-        SetStdHandle(STD_OUTPUT_HANDLE, raw_handle)?;
-        SetStdHandle(STD_ERROR_HANDLE, raw_handle)?;
-        FreeConsole()?;
-    }
+fn hide_console_window() -> anyhow::Result<()> {
+    use windows::Win32::System::Console::FreeConsole;
+    unsafe { FreeConsole()? };
     Ok(())
 }
 
@@ -401,7 +396,7 @@ fn main() -> anyhow::Result<()> {
     // eprintln! apa pun lain di bawah ini (lihat dokumentasi fungsinya).
     #[cfg(windows)]
     if config.hide_console {
-        hide_console_and_redirect_to_log()?;
+        hide_console_window()?;
     }
     #[cfg(not(windows))]
     if config.hide_console {
@@ -443,10 +438,35 @@ fn main() -> anyhow::Result<()> {
     // sysfs hwmon (k10temp/amd_energy atau zenpower) di Linux.
     // Graceful: kalau driver tidak ada / CPU tidak didukung, warning di stderr
     // dan lanjut — data ditampilkan sebagai N/A.
-    let cpu_sensor = cpu_sensor::CpuSensor::new();
+    // Dibungkus `Arc<Mutex<_>>` karena di-share dengan thread integrasi
+    // DeepCool (biar dua layar pakai satu instance sensor / satu handle
+    // PawnIO — bukan buka dua).
+    let cpu_sensor = Arc::new(Mutex::new(cpu_sensor::CpuSensor::new()));
     // Baseline energy counter sebelum loop dimulai — buat snapshot pertama
     // power draw di iterasi sysinfo refresh pertama (lihat bagian loop).
-    let mut last_cpu_energy = cpu_sensor.sample_energy();
+    let mut last_cpu_energy = cpu_sensor.lock().expect("cpu_sensor lock").sample_energy();
+
+    // Integrasi DeepCool Digital: kirim suhu/usage/power/frekuensi CPU ke
+    // display cooler/casing DeepCool lewat HID, dijalankan di thread
+    // background. Kalau device tidak ketemu, thread cuma retry tiap beberapa
+    // detik tanpa mengganggu loop utama.
+    if config.deepcool_enabled {
+        println!(
+            "DeepCool: aktif, interval {}ms (matikan dengan --no-deepcool)",
+            config.deepcool_update_ms
+        );
+        deepcool::spawn(
+            Arc::clone(&cpu_sensor),
+            deepcool::Options {
+                update_ms: config.deepcool_update_ms,
+            },
+        );
+    }
+
+    // Pembaca frekuensi CPU real-time (PDH di Windows, sysfs cpufreq di
+    // Linux) — lihat cpu_freq.rs. Graceful: kalau gagal, baris info / panel
+    // CPU menampilkan N/A.
+    let cpu_freq = cpu_freq::CpuFreq::new();
 
     // Sensor GPU AMD (suhu Edge, ASIC power, fan RPM) via ADL PMLog.
     // Graceful: kalau driver tidak ada / GPU bukan AMD, warning dan lanjut (N/A).
@@ -482,6 +502,7 @@ fn main() -> anyhow::Result<()> {
     let mut latest_volume: Option<(f32, bool)> = None; // (percent, muted)
     let mut latest_cpu_temp: Option<f32> = None; // °C
     let mut latest_cpu_power: Option<f32> = None; // Watt
+    let mut latest_cpu_mhz: Option<u32> = None; // frekuensi real-time
 
     let resolution = TROFEO_VISION_9_16;
     let mut sys = System::new_all();
@@ -558,10 +579,15 @@ fn main() -> anyhow::Result<()> {
             }
 
             // Suhu + power CPU (hanya AMD Zen1-Zen4, lihat cpu_sensor.rs).
-            latest_cpu_temp = cpu_sensor.get_temp_c();
+            let sensor = cpu_sensor.lock().expect("cpu_sensor lock");
+            latest_cpu_temp = sensor.get_temp_c();
             latest_cpu_power =
-                cpu_sensor.calc_power_watts(last_cpu_energy, sysinfo_delta_ms);
-            last_cpu_energy = cpu_sensor.sample_energy();
+                sensor.calc_power_watts(last_cpu_energy, sysinfo_delta_ms);
+            last_cpu_energy = sensor.sample_energy();
+            drop(sensor);
+
+            // Frekuensi CPU real-time (lihat cpu_freq.rs).
+            latest_cpu_mhz = cpu_freq.sample_mhz();
 
             // Sensor GPU AMD: suhu Edge, ASIC power, fan RPM via ADL PMLog.
             latest_gpu_data = gpu_amd.sample();
@@ -608,6 +634,7 @@ fn main() -> anyhow::Result<()> {
                 &latest_gpu_data,
                 latest_cpu_temp,
                 latest_cpu_power,
+                latest_cpu_mhz,
                 color_mode,
             );
         } else if is_idle {
@@ -625,6 +652,7 @@ fn main() -> anyhow::Result<()> {
             latest_volume,
             latest_cpu_temp,
             latest_cpu_power,
+            latest_cpu_mhz,
             now_playing_title.as_deref(),
             &mut now_playing_marquee,
         );
@@ -803,6 +831,7 @@ fn draw_game_dashboard(
     gpu_data: &gpu_amd::GpuAmdData,
     cpu_temp: Option<f32>,
     cpu_power: Option<f32>,
+    cpu_mhz: Option<u32>,
     color_mode: ColorMode,
 ) {
     let width = fb.width();
@@ -857,11 +886,17 @@ fn draw_game_dashboard(
 
     let cpu_pct = sys.global_cpu_info().cpu_usage();
     let cpu_value = format!("{cpu_pct:.0}%");
-    let cpu_detail = match (cpu_temp, cpu_power) {
-        (Some(t), Some(w)) => format!("{t:.0}C {w:.0}W"),
-        (Some(t), None) => format!("{t:.0}C"),
-        (None, Some(w)) => format!("{w:.0}W"),
-        (None, None) => "N/A".to_string(),
+    // Detail CPU: frekuensi real-time (GHz/MHz) + suhu + power — tampilkan
+    // field yang tersedia saja (mis. kalau driver suhu tidak ada, cukup
+    // frekuensi + watt).
+    let cpu_detail = {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(m) = cpu_mhz {
+            parts.push(format_freq_mhz(m));
+        }
+        if let Some(t) = cpu_temp { parts.push(format!("{t:.0}C")); }
+        if let Some(w) = cpu_power { parts.push(format!("{w:.0}W")); }
+        if parts.is_empty() { "N/A".to_string() } else { parts.join(" ") }
     };
 
     let used_mb = sys.used_memory() / 1024 / 1024;
@@ -967,8 +1002,9 @@ fn draw_idle_clock(fb: &mut Framebuffer, color_mode: ColorMode) {
 }
 
 /// Gambar 3 baris info di atas layar:
-/// - Baris 1: CPU, GPU usage, RAM, uptime, jam, tanggal.
-/// - Baris 2: network throughput (KB/s) & disk IO (MB/s).
+/// - Baris 1: CPU usage + frekuensi real-time + suhu/power, GPU usage,
+///   uptime, jam, tanggal.
+/// - Baris 2: RAM, network throughput (KB/s) & disk IO (MB/s).
 /// - Baris 3: volume master & judul lagu/media yang sedang diputar.
 ///
 /// Field yang datanya tidak tersedia (mis. GPU usage gagal diinisialisasi,
@@ -985,6 +1021,7 @@ fn draw_status_lines(
     volume: Option<(f32, bool)>,
     cpu_temp: Option<f32>,
     cpu_power: Option<f32>,
+    cpu_mhz: Option<u32>,
     now_playing: Option<&str>,
     marquee: &mut Marquee,
 ) {
@@ -992,7 +1029,7 @@ fn draw_status_lines(
     let color = (0xE0, 0xE0, 0xE0);
     let line_height = Framebuffer::text_height(scale) + 6;
 
-    // --- Baris 1: CPU, GPU, RAM, uptime, jam, tanggal ---
+    // --- Baris 1: CPU, GPU, uptime, jam, tanggal ---
     let cpu = sys.global_cpu_info().cpu_usage();
     let used_mb = sys.used_memory() / 1024 / 1024;
     let total_mb = sys.total_memory() / 1024 / 1024;
@@ -1033,15 +1070,19 @@ fn draw_status_lines(
         (None,    Some(w)) => format!("{w:.0}W"),
         (None,    None)    => "N/A".to_string(),
     };
+    let cpu_freq_str = match cpu_mhz {
+        Some(m) => format_freq_mhz(m),
+        None => "N/A".to_string(),
+    };
     let line1 = format!(
-        "CPU {cpu:.0}% {cpu_hw_str}  GPU {gpu_full}  MEM {used_mb}/{total_mb}MB  UP {uptime_str}  {time_str}  {date_str}"
+        "CPU {cpu:.0}% {cpu_freq_str} {cpu_hw_str}  GPU {gpu_full}  UP {uptime_str}  {time_str}  {date_str}"
     );
 
-    // --- Baris 2: network + disk IO ---
+    // --- Baris 2: RAM + network + disk IO ---
     let (net_down, net_up) = net_kb;
     let (disk_read, disk_write) = disk_mb;
     let line2 = format!(
-        "NET DN {net_down:.0}KB/S UP {net_up:.0}KB/S  DISK R {disk_read:.1}MB/S W {disk_write:.1}MB/S"
+        "MEM {used_mb}/{total_mb}MB  NET DN {net_down:.0}KB/S UP {net_up:.0}KB/S  DISK R {disk_read:.1}MB/S W {disk_write:.1}MB/S"
     );
 
     // --- Baris 3: volume + now playing (judul di-scroll kalau kepanjangan) ---
@@ -1083,6 +1124,17 @@ fn draw_status_lines(
     } else {
         // Muat pas atau lebih kecil dari lebar area -> tampil statis, diam.
         fb.draw_text(title_x0, y, song_str, color.0, color.1, color.2, scale);
+    }
+}
+
+/// Format frekuensi CPU: >= 1000 MHz tampil sebagai GHz 1 desimal
+/// (mis. "4.9GHz"), di bawahnya tetap MHz ("950MHz"). Font bitmap ASCII
+/// (menghindari karakter ° / non-ASCII apa pun).
+fn format_freq_mhz(mhz: u32) -> String {
+    if mhz >= 1000 {
+        format!("{:.1}GHz", mhz as f32 / 1000.0)
+    } else {
+        format!("{mhz}MHz")
     }
 }
 
