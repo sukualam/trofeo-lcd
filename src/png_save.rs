@@ -1,12 +1,16 @@
-//! Simpan isi `Framebuffer` sebagai file **PNG** (lossless) tanpa dependensi
-//! tambahan. Encodermya menulis PNG dengan blok deflate "stored" (tanpa
-//! kompresi — tetap 100% valid untuk semua penampil PNG). Konsekuensinya
-//! file persis sebesar data raw (1920x462 ≈ 2,6 MB), tapi implementasinya
-//! kecil, bebas crate baru, dan hanya dijalankan sekali-sekali (saat hotkey
-//! tangkapan layar ditekan — lihat src/hotkey.rs).
+//! Simpan isi `Framebuffer` sebagai file **PNG** (lossless) dengan kompresi
+//! deflate via crate `flate2` (backend murni Rust miniz_oxide — tanpa
+//! dependensi C). Screenshot diambil lewat hotkey (jarang), jadi dipakai
+//! level kompresi terbaik; latar yang rata (bar EQ, info sistem) biasanya
+//! menyusut dari ±2,6 MB raw menjadi beberapa ratus KB. Sendiri bobotnya
+//! kecil dan hanya aktif saat tombol hotkey ditekan (lihat src/hotkey.rs).
 
 use std::io;
+use std::io::Write;
 use std::path::PathBuf;
+
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 
 use crate::Framebuffer;
 
@@ -38,7 +42,9 @@ fn png_encode(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
     ihdr.push(0); // interlace: none
     push_chunk(&mut out, b"IHDR", &ihdr);
 
-    push_chunk(&mut out, b"IDAT", &zlib_stored(&raw));
+    // Level kompresi terbaik: screenshot jarang diambil, jadi kecepatan
+    // tidak penting — yang penting ukuran file sekecil mungkin.
+    push_chunk(&mut out, b"IDAT", &zlib_stream(&raw));
 
     push_chunk(&mut out, b"IEND", &[]);
     out
@@ -70,40 +76,14 @@ fn crc_update(mut crc: u32, data: &[u8]) -> u32 {
     crc
 }
 
-/// Stream zlib berisi blok deflate "stored" (tidak dikompres tapi valid) —
-/// menghindari ketergantungan ke crate flate2/zlib.
-fn zlib_stored(data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len() + data.len() / 65_535 * 5 + 6);
-    out.push(0x78); // CMF: window 32K, method deflate
-    out.push(0x01); // FLG: FCHECK = 1 (0x7801 % 31 == 0), FDICT off
-
-    let mut pos = 0usize;
-    loop {
-        let remaining = data.len() - pos;
-        let len = remaining.min(65_535);
-        let is_last = pos + len == data.len();
-        out.push(if is_last { 0x01 } else { 0x00 }); // BFINAL + tipe stored
-        out.extend_from_slice(&(len as u16).to_le_bytes());
-        out.extend_from_slice(&(!(len as u16)).to_le_bytes());
-        out.extend_from_slice(&data[pos..pos + len]);
-        pos += len;
-        if is_last {
-            break;
-        }
-    }
-    out.extend_from_slice(&adler32(data).to_be_bytes());
-    out
-}
-
-/// Adler-32 — checksum footer yang diminta spesifikasi zlib.
-fn adler32(data: &[u8]) -> u32 {
-    const MOD: u32 = 65_521;
-    let (mut a, mut b) = (1u32, 0u32);
-    for &byte in data {
-        a = (a + u32::from(byte)) % MOD;
-        b = (b + a) % MOD;
-    }
-    (b << 16) | a
+/// Bungkus `data` sebagai stream zlib (header + deflate + checksum adler-32)
+/// dengan kompresi level terbaik.
+fn zlib_stream(data: &[u8]) -> Vec<u8> {
+    let mut enc = ZlibEncoder::new(Vec::new(), Compression::best());
+    enc.write_all(data)
+        .expect("menulis ke ZlibEncoder::new(Vec) tidak mungkin gagal");
+    enc.finish()
+        .expect("menyelesaikan ZlibEncoder::new(Vec) tidak mungkin gagal")
 }
 
 /// Encode `fb` sebagai data PNG.
@@ -156,5 +136,28 @@ mod tests {
         let out = encode(&fb);
         std::fs::write(std::path::Path::new("target/png_test_sample.png"), out)
             .expect("tulis contoh PNG");
+    }
+
+    /// Latar rata (layar visualizer/isian solid) harus terkompresi jauh di
+    /// bawah ukuran raw 1920x462 (≈2,6 MB) — ini inti alasan memakai deflate.
+    #[test]
+    fn flat_screen_compresses_well() {
+        let mut fb = Framebuffer::new(Resolution::new(1920, 462));
+        let px = fb.as_bytes_mut();
+        for (i, byte) in px.iter_mut().enumerate() {
+            // Isian quasi-solid: RGB hijau gelap, sedikit variasi bercak
+            // terang supaya tetap "gambar" yang sah.
+            *byte = if i % 97 == 0 { 0x30 } else { 0x12 };
+        }
+        let raw = px.len();
+        let png = encode(&fb);
+        std::fs::write(std::path::Path::new("target/png_test_flat.png"), &png)
+            .expect("tulis contoh PNG");
+        assert!(
+            png.len() * 10 < raw,
+            "PNG terlalu besar: {} byte vs raw {} byte",
+            png.len(),
+            raw
+        );
     }
 }

@@ -8,6 +8,9 @@ license = "GPL-3.0-or-later"
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+# Kompresi deflate/zlib (backend murni Rust miniz_oxide — tidak butuh
+# toolchain C) untuk file tangkapan layar PNG di src/png_save.rs.
+flate2 = "1"
 jpeg-encoder = "0.5"
 # Dipakai HANYA untuk jalanin runtime async minimal buat client OpenRGB
 # (openrgb2), bukan buat program secara keseluruhan (loop utama tetap sync).
