@@ -1,67 +1,68 @@
 # trofeo_lcd
 
-**Bahasa Indonesia** · [English](./README.en.md)
+**English** · [Bahasa Indonesia](./README.id.md)
 
-Visualizer audio + monitor info sistem untuk layar **Thermalright Trofeo
-Vision 9.16 LCD** (USB `0416:5408`, protokol "LY"). Driver ditulis ulang
-byte-per-byte dari [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
+Audio visualizer + system info monitor for the **Thermalright Trofeo Vision
+9.16 LCD** (USB `0416:5408`, "LY" protocol). The driver was rewritten
+byte-for-byte from [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
 
-## Fitur
+## Features
 
-- Bar EQ (48 bar) dari audio yang sedang diputar (WASAPI loopback di
-  Windows, PulseAudio/PipeWire di Linux), warna hijau→kuning→merah.
-- Info sistem: CPU %, frekuensi CPU real-time, RAM, uptime, jam & tanggal.
-- Bisa sekaligus menyalakan display **DeepCool** (kirim data CPU via HID).
-- **Mode second monitor** (`trofeo_screen`): LCD jadi monitor sekunder asli.
-- Sinkron warna bar EQ dengan device **OpenRGB**.
-- FPS adaptif: turun ke idle saat diam → hemat CPU.
+- EQ bars (48) from currently playing audio (WASAPI loopback on Windows,
+  PulseAudio/PipeWire on Linux), colored green→yellow→red.
+- System info: CPU %, real-time CPU frequency, RAM, uptime, clock & date.
+- Can also drive a **DeepCool** display (sends CPU data over HID).
+- **Second monitor mode** (`trofeo_screen`): the LCD becomes a real second
+  monitor.
+- Sync EQ bar color with an **OpenRGB** device.
+- Adaptive FPS: drops to idle when silent → saves CPU.
 
-## Cara pakai
+## Usage
 
 ```bash
 cargo build --release
-./target/release/trofeo_lcd          # Windows: .\target\release\trofeo_lcd.exe
+./target/release/trofeo_lcd      # Windows: .\target\release\trofeo_lcd.exe
 ```
 
-**Windows** — untuk membaca suhu/power CPU AMD, install
-[PawnIO](https://github.com/namazso/PawnIO) dan jalankan sebagai
-Administrator.
+**Windows** — to read AMD CPU temp/power, install
+[PawnIO](https://github.com/namazso/PawnIO) and run as Administrator.
 
-**Linux** — butuh `pkg-config` + header PulseAudio saat build, dan
-`playerctl` untuk judul lagu. Izin USB tanpa `sudo`: pasang `99-trofeo-lcd.rules` (lihat isi filenya).
+**Linux** — needs `pkg-config` + PulseAudio headers to build, and
+`playerctl` for song titles. For USB access without `sudo`, install
+`99-trofeo-lcd.rules` (see the file's contents).
 
-## Opsi utama
+## Main options
 
-| Opsi | Fungsi | Default |
+| Option | Purpose | Default |
 |---|---|---|
-| `--idle-fps` / `--active-fps` | FPS saat diam / ada suara | `2` / `15` |
-| `--no-deepcool` | Matikan integrasi DeepCool | aktif |
-| `--deepcool-update-ms` | Interval kirim data DeepCool (100–2000 ms) | `1000` |
-| `--openrgb-device <NAMA>` | Sinkron warna dengan device OpenRGB | nonaktif |
-| `--hide-console` | Sembunyikan jendela terminal (Windows) | nonaktif |
+| `--idle-fps` / `--active-fps` | FPS when idle / has sound | `2` / `15` |
+| `--no-deepcool` | Turn off DeepCool integration | enabled |
+| `--deepcool-update-ms` | DeepCool send interval (100–2000 ms) | `1000` |
+| `--openrgb-device <NAME>` | Sync color with an OpenRGB device | disabled |
+| `--hide-console` | Hide the console window (Windows) | disabled |
 
-## Mode second monitor
+## Second monitor mode
 
-Jalankan **`trofeo_screen`** (bukan `trofeo_lcd` — sama-sama pakai LCD, tak
-boleh bersamaan):
+Run **`trofeo_screen`** (instead of `trofeo_lcd` — they share the LCD, so
+don't run them together):
 
 ```bash
-./target/release/trofeo_screen --list-displays   # cek monitor
-./target/release/trofeo_screen                   # stream ke LCD
+./target/release/trofeo_screen --list-displays    # list monitors
+./target/release/trofeo_screen                    # stream to LCD
 ```
 
-Butuh *Virtual Display Driver* (VDD) 1920×462 — lihat
+Requires a *Virtual Display Driver* (VDD) at 1920×462 — see
 **[GUIDE_SECOND_MONITOR.md](./GUIDE_SECOND_MONITOR.md)**.
 
-## Struktur
+## Structure
 
-- `src/lib.rs` — driver USB: handshake, chunking, JPEG encode, `Framebuffer`.
-- `src/audio.rs` — capture audio (WASAPI / PulseAudio-PipeWire).
-- `src/cpu_sensor.rs`, `src/cpu_freq.rs` — suhu/power & frekuensi CPU.
-- `src/deepcool/` — driver display DeepCool (HID).
-- `src/dxgi_capture.rs` + `src/bin/screen.rs` — mode second monitor.
-- `src/main.rs` — loop utama: audio → FFT → bar EQ → kirim ke layar.
+- `src/lib.rs` — USB driver: handshake, chunking, JPEG encode, `Framebuffer`.
+- `src/audio.rs` — audio capture (WASAPI / PulseAudio-PipeWire).
+- `src/cpu_sensor.rs`, `src/cpu_freq.rs` — CPU temp/power & frequency.
+- `src/deepcool/` — DeepCool display drivers (HID).
+- `src/dxgi_capture.rs` + `src/bin/screen.rs` — second monitor mode.
+- `src/main.rs` — main loop: audio → FFT → EQ bars → send to screen.
 
-## Lisensi
+## License
 
-GPL-3.0-or-later (mengikuti proyek upstream rujukan).
+GPL-3.0-or-later (follows the referenced upstream project).

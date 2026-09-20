@@ -1,35 +1,34 @@
-# Panduan: Menggunakan Trofeo Vision 9.16 Sebagai Second Monitor
+# Guide: Using the Trofeo Vision 9.16 as a Second Monitor
 
-**Bahasa Indonesia** · [English](./GUIDE_SECOND_MONITOR.en.md)
+**English** · [Bahasa Indonesia](./GUIDE_SECOND_MONITOR.id.md)
 
-Panduan ini menjelaskan cara mengubah layar **Thermalright Trofeo Vision 9.16
-LCD** menjadi **monitor sekunder asli di Windows**, sehingga Anda bisa
-menggeser jendela aplikasi (seperti Spotify, Discord, browser, atau task
-manager) langsung ke layar Trofeo.
+This guide explains how to turn the **Thermalright Trofeo Vision 9.16 LCD**
+into a **real second monitor on Windows**, so you can drag app windows (like
+Spotify, Discord, a browser, or Task Manager) directly onto the Trofeo
+screen.
 
 ---
 
-## 1. Cara Kerja
+## 1. How it works
 
-Layar Trofeo terhubung ke PC hanya melalui kabel USB (bukan HDMI /
-DisplayPort). Oleh karena itu:
+The Trofeo screen connects to the PC only through a USB cable (no HDMI /
+DisplayPort). Therefore:
 
-1. Kita membuat sebuah **Monitor Virtual** di Windows dengan resolusi native
+1. We create a **Virtual Monitor** in Windows at the native resolution
    **1920×462**.
-2. Program **`trofeo_screen`** menangkap tampilan monitor virtual tersebut
-   secara real-time via GPU (DXGI Desktop Duplication API) dan mengirimkannya
-   ke layar Trofeo melalui USB.
+2. The **`trofeo_screen`** program captures that virtual monitor in real
+   time via the GPU (DXGI Desktop Duplication API) and sends it to the Trofeo
+   screen over USB.
 
 ---
 
-## 2. Langkah 1: Memasang Virtual Display Driver (VDD)
+## 2. Step 1: Installing the Virtual Display Driver (VDD)
 
-1. Kunjungi rilis open-source **[Virtual-Display-Driver (VDD)](https://github.com/itsmebias/virtual-display-driver/releases)**.
-2. Unduh file `.zip` versi terbaru dan ekstrak foldernya (misalnya ke
-   `C:\VirtualDisplayDriver`).
-3. Buka file konfigurasi `vdd.xml` (atau `options.txt` tergantung versi VDD)
-   menggunakan Notepad.
-4. Tambahkan resolusi khusus Trofeo Vision:
+1. Visit the open-source **[Virtual-Display-Driver (VDD)](https://github.com/itsmebias/virtual-display-driver/releases)** releases page.
+2. Download the latest `.zip` and extract it (e.g. to `C:\VirtualDisplayDriver`).
+3. Open the config file `vdd.xml` (or `options.txt`, depending on the VDD
+   version) with Notepad.
+4. Add the special Trofeo Vision resolution:
    ```xml
    <resolution>
      <width>1920</width>
@@ -37,99 +36,99 @@ DisplayPort). Oleh karena itu:
      <refresh_rate>60</refresh_rate>
    </resolution>
    ```
-5. Klik kanan file `install.bat` (atau jalankan perintah instalasi VDD
-   sebagai Administrator).
-6. Buka **Windows Settings → System → Display**:
-   - Anda akan melihat monitor baru muncul (**Display 2**).
-   - Atur resolusinya ke **1920 × 462**.
-   - Posisikan monitor kedua di atas, bawah, atau samping monitor utama
-     sesuai keinginan.
+5. Right-click `install.bat` (or run the VDD install command) as
+   Administrator.
+6. Open **Windows Settings → System → Display**:
+   - A new monitor (**Display 2**) should appear.
+   - Set its resolution to **1920 × 462**.
+   - Position the second monitor above, below, or beside your main monitor
+     as you wish.
 
 ---
 
-## 3. Langkah 2: Menjalankan `trofeo_screen`
+## 3. Step 2: Running `trofeo_screen`
 
-### Cek Monitor yang Terdeteksi
+### Check detected monitors
 
 ```bash
 cargo run --bin trofeo_screen -- --list-displays
 ```
 
-Atau dari binary release (`.\target\release\trofeo_screen.exe --list-displays`):
+Or from the release binary (`.\target\release\trofeo_screen.exe --list-displays`):
 
 ```text
-Daftar Monitor Terdeteksi:
+Detected Monitors:
 ---------------------------------------------------------------------------
-INDEX  ADAPTER                  DEVICE           RESOLUSI     STATUS
+INDEX  ADAPTER                  DEVICE           RESOLUTION  STATUS
 ---------------------------------------------------------------------------
-0      AMD Radeon RX 6600       \\.\DISPLAY1     1920x1080    Aktif
-1      IddCx Virtual Display    \\.\DISPLAY2     1920x462     Aktif [MATCH 1920x462]
+0      AMD Radeon RX 6600       \\.\DISPLAY1     1920x1080    Active
+1      IddCx Virtual Display    \\.\DISPLAY2     1920x462     Active [MATCH 1920x462]
 ---------------------------------------------------------------------------
 ```
 
-*Program otomatis mendeteksi display yang beresolusi 1920×462!*
+*The program automatically detects the display at 1920×462!*
 
-### Mulai Streaming ke Layar Trofeo
+### Start streaming to the Trofeo screen
 
 ```bash
 cargo run --release --bin trofeo_screen
 ```
 
-Atau langsung jalankan binary yang sudah di-compile:
+Or just run the compiled binary:
 
 ```powershell
 .\target\release\trofeo_screen.exe
 ```
 
-Program akan otomatis:
+The program will automatically:
 
-1. Terhubung ke layar Trofeo via USB bulk (`0416:5408`).
-2. Menangkap tampilan monitor virtual secara real-time.
-3. Mengirimkan pergerakan jendela dan kursor mouse ke layar Trofeo.
+1. Connect to the Trofeo screen over USB bulk (`0416:5408`).
+2. Capture the virtual monitor in real time.
+3. Stream window movement and the mouse cursor to the Trofeo screen.
 
 ---
 
-## 4. Opsi & Parameter Perintah
+## 4. Options & command-line arguments
 
-| Opsi | Fungsi | Default |
+| Option | Purpose | Default |
 |---|---|---|
-| `-l`, `--list-displays` | Tampilkan daftar monitor terdeteksi lalu keluar | - |
-| `-d`, `--display <N>` | Tentukan index monitor secara manual jika ada beberapa | Auto (1920x462) |
-| `--fps <N>` | Target frame rate maksimum saat layar bergerak | `30` |
-| `--idle-fps <N>` | Kecepatan polling saat layar diam/statis (menghemat CPU) | `10` |
-| `-q`, `--quality <1-100>` | Kualitas kompresi gambar JPEG | `75` |
-| `-r`, `--rotate` | Putar tampilan 180° jika fisik layar dipasang terbalik | `false` |
-| `--hide-console` | Sembunyikan jendela hitam terminal (bagus untuk startup) | `false` |
+| `-l`, `--list-displays` | List detected monitors and exit | - |
+| `-d`, `--display <N>` | Pick a monitor index manually when there are several | Auto (1920x462) |
+| `--fps <N>` | Maximum target frame rate while the screen moves | `30` |
+| `--idle-fps <N>` | Polling speed while the screen is static (saves CPU) | `10` |
+| `-q`, `--quality <1-100>` | JPEG image compression quality | `75` |
+| `-r`, `--rotate` | Rotate the image 180° if the screen is installed upside down | `false` |
+| `--hide-console` | Hide the black terminal window (nice for startup) | `false` |
 
-### Contoh Penggunaan Khusus
+### Example use cases
 
-* **Jika layar dipasang terbalik**:
+* **If the screen is mounted upside down**:
   ```powershell
   .\target\release\trofeo_screen.exe --rotate
   ```
-* **Kualitas gambar lebih tajam (misal untuk teks kecil)**:
+* **Sharper images (e.g. for small text)**:
   ```powershell
   .\target\release\trofeo_screen.exe --quality 85 --fps 25
   ```
-* **Dijalankan otomatis saat Windows login tanpa jendela hitam**:
+* **Auto-start at Windows login with no black window**:
   ```powershell
   .\target\release\trofeo_screen.exe --hide-console
   ```
 
 ---
 
-## 5. Menjalankan Otomatis Saat Boot / Login Windows
+## 5. Auto-start at Windows boot / login
 
-1. Tekan `Win + R`, ketik `shell:startup`, lalu tekan **Enter**.
-2. Klik kanan di dalam folder tersebut → **New** → **Shortcut**.
-3. Arahkan target ke lokasi executable:
+1. Press `Win + R`, type `shell:startup`, and press **Enter**.
+2. Right-click inside that folder → **New** → **Shortcut**.
+3. Point the target at the executable location:
    ```text
    "C:\Users\USER\Documents\Default Project\trofeo-lcd\target\release\trofeo_screen.exe" --hide-console
    ```
-4. Klik **Next** dan beri nama `Trofeo Screen`. Sekarang monitor sekunder
-   akan otomatis aktif setiap kali Anda masuk ke Windows!
+4. Click **Next** and name it `Trofeo Screen`. The second monitor will now
+   activate automatically every time you log into Windows!
 
 ---
 
-> ⚠️ **Penting:** `trofeo_screen` dan `trofeo_lcd` sama-sama memakai LCD yang
-> sama — jalankan **salah satu**, jangan keduanya bersamaan.
+> ⚠️ **Important:** `trofeo_screen` and `trofeo_lcd` use the same LCD — run
+> **one of them**, never both at the same time.
