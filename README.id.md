@@ -6,7 +6,9 @@ Visualizer audio + monitor info sistem untuk layar **Thermalright Trofeo
 Vision 9.16 LCD** (USB `0416:5408`, protokol "LY"). Driver ditulis ulang
 byte-per-byte dari [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
 
-Layar Trofeo LCD saat menampilkan tampilannya dalam tiga mode default:
+Tampilan layar **menyesuaikan otomatis dengan kondisi komputer** — tanpa
+perlu ganti mode manual. Trofeo LCD menampilkan salah satu tampilan di
+bawah bergantung kondisi saat ini:
 
 **Idle** — audio sedang tenang, jadi bar EQ rendah dan baris atas
 menampilkan info sistem: usage & frekuensi real-time CPU, RAM, uptime, jam
