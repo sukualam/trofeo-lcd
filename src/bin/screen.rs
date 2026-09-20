@@ -45,7 +45,7 @@ fn print_help() {
         \x20 -r, --rotate              Putar tampilan 180 derajat (jika layar terbalik)\n\
         \x20     --hide-console        Sembunyikan jendela konsol di Windows (cocok untuk autorun)\n\
         \x20 -k, --screenshot-key <KEY>  Global hotkey untuk menyimpan tangkapan layar\n\
-        \x20                           frame LCD sebagai PNG ke folder screenshots/ (f1-f12,\n\
+        \x20                           frame LCD sebagai PNG ke Desktop (f1-f12,\n\
         \x20                           atau printscreen). Default: NONAKTIF.\n\
         \x20 -h, --help                Tampilkan bantuan ini\n"
     );
@@ -200,7 +200,7 @@ fn main() -> Result<()> {
         match hotkey::register(vk) {
             Ok(h) => {
                 println!(
-                    "Hotkey tangkapan layar: {} (global) — tekan untuk menyimpan frame LCD sebagai PNG ke screenshots/",
+                    "Hotkey tangkapan layar: {} (global) — tekan untuk menyimpan frame LCD sebagai PNG ke Desktop",
                     label.to_uppercase()
                 );
                 snap_hotkey = Some(h);

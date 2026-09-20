@@ -165,7 +165,7 @@ struct Config {
     deepcool_enabled: bool,
     /// Interval pengiriman data ke display DeepCool, ms (dibatasi 100-2000).
     deepcool_update_ms: u64,
-    /// Global hotkey tangkapan layar LCD sebagai PNG ke folder `screenshots/`
+    /// Global hotkey tangkapan layar LCD sebagai PNG ke Desktop
     /// — (virtual-key code, label asli dari argumen). `None` = NONAKTIF
     /// (default); aktif hanya kalau `--screenshot-key` diberikan.
     screenshot_key: Option<(u32, String)>,
@@ -213,7 +213,7 @@ fn print_help() {
          \x20\x20                          Task Scheduler saat login. Tidak menulis log\n\
          \x20\x20                          ke file. Hanya berlaku di Windows.\n\
          \x20\x20-k, --screenshot-key <KEY>  Global hotkey untuk menyimpan tangkapan layar\n\
-         \x20\x20                          frame LCD sebagai PNG ke folder screenshots/\n\
+         \x20\x20                          frame LCD sebagai PNG ke Desktop\n\
          \x20\x20                          (f1-f12 atau printscreen). Default: NONAKTIF.\n\
          \x20\x20-h, --help                Tampilkan bantuan ini"
     );
@@ -492,7 +492,7 @@ fn main() -> anyhow::Result<()> {
         match hotkey::register(vk) {
             Ok(h) => {
                 println!(
-                    "Hotkey tangkapan layar: {} (global) — tekan untuk menyimpan frame LCD sebagai PNG ke screenshots/",
+                    "Hotkey tangkapan layar: {} (global) — tekan untuk menyimpan frame LCD sebagai PNG ke Desktop",
                     label.to_uppercase()
                 );
                 snap_hotkey = Some(h);

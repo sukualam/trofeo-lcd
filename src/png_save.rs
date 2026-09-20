@@ -91,15 +91,48 @@ pub fn encode(fb: &Framebuffer) -> Vec<u8> {
     png_encode(fb.as_bytes(), fb.width(), fb.height())
 }
 
-/// Simpan isi framebuffer sebagai PNG di folder `screenshots/` dengan nama
+/// Simpan isi framebuffer sebagai PNG di folder **Desktop** dengan nama
 /// `{prefix}_YYYYMMDD_HHMMSS.png`, lalu kembalikan path lengkapnya.
+///
+/// Lokasi Desktop diambil dari API resmi Windows (SHGetKnownFolderPath →
+/// FOLDERID_Desktop) sehingga tetap benar meski Desktop direlokasi OneDrive
+/// atau di-redirect; di OS lain memakai `$HOME/Desktop`.
 pub fn save(fb: &Framebuffer, prefix: &str) -> io::Result<PathBuf> {
-    let dir = std::path::Path::new("screenshots");
-    std::fs::create_dir_all(dir)?;
+    let dir = desktop_dir()?;
+    std::fs::create_dir_all(&dir)?;
     let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let path = dir.join(format!("{}_{}.png", prefix, stamp));
     std::fs::write(&path, encode(fb))?;
     Ok(path)
+}
+
+/// Path folder Desktop user.
+#[cfg(windows)]
+fn desktop_dir() -> io::Result<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Desktop, KNOWN_FOLDER_FLAG, SHGetKnownFolderPath};
+
+    unsafe {
+        let pw = SHGetKnownFolderPath(&FOLDERID_Desktop, KNOWN_FOLDER_FLAG(0), None)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("SHGetKnownFolderPath(Desktop) gagal: {e}")))?;
+
+        // pw bertipe PWSTR hasil CoTaskMemAlloc — salin jadi String dulu,
+        // baru CoTaskMemFree.
+        let wide: &[u16] = pw.as_wide();
+        let dir = PathBuf::from(String::from_utf16_lossy(wide));
+
+        CoTaskMemFree(Some(pw.as_ptr() as *const core::ffi::c_void));
+        Ok(dir)
+    }
+}
+
+/// Path folder Desktop (fallback non-Windows).
+#[cfg(not(windows))]
+fn desktop_dir() -> io::Result<PathBuf> {
+    let home = std::env::var("HOME").map_err(|e| {
+        io::Error::new(io::ErrorKind::NotFound, format!("variabel HOME tidak di-set: {e}"))
+    })?;
+    Ok(PathBuf::from(home).join("Desktop"))
 }
 
 #[cfg(test)]
@@ -107,6 +140,13 @@ mod tests {
     use super::*;
     use crate::Framebuffer;
     use crate::Resolution;
+
+    #[test]
+    fn desktop_dir_points_to_existing_folder() {
+        let dir = desktop_dir().expect("desktop_dir harus sukses");
+        assert_eq!(dir.file_name().and_then(|s| s.to_str()), Some("Desktop"));
+        assert!(dir.is_dir(), "path {dir:?} harus folder yang ada");
+    }
 
     #[test]
     fn png_signature_ihdr_dimensions_iend() {

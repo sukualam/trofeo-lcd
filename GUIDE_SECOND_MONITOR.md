@@ -99,7 +99,7 @@ The program will automatically:
 | `-q`, `--quality <1-100>` | JPEG image compression quality | `75` |
 | `-r`, `--rotate` | Rotate the image 180° if the screen is installed upside down | `false` |
 | `--hide-console` | Hide the black terminal window (nice for startup) | `false` |
-| `-k`, `--screenshot-key <KEY>` | Global hotkey to save a screenshot of the current LCD frame (f1-f12, `printscreen`). Lossless PNG files are saved to the `screenshots/` folder | off |
+| `-k`, `--screenshot-key <KEY>` | Global hotkey to save a screenshot of the current LCD frame (f1-f12, `printscreen`). Lossless PNG files are saved to your **Desktop** | off |
 
 ### Example use cases
 
