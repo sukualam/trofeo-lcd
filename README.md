@@ -70,8 +70,6 @@ default settings (idle FPS 2 / active 15, DeepCool enabled):
 
 | Metric | Measured |
 |---|---|
-| CPU usage | ≈1.9% of the whole CPU |
-| — per core | ≈0.16% of one core |
 | RAM | ~13 MB working set (stable, no growth) |
 
 It stays this light thanks to adaptive FPS (JPEG encode + USB transfer only
