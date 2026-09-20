@@ -24,8 +24,7 @@ cargo build --release
 ./target/release/trofeo_lcd      # Windows: .\target\release\trofeo_lcd.exe
 ```
 
-**Windows** — requires the WinUSB USB driver (via [Zadig](https://zadig.akeo.io/),
-make sure the target driver = WinUSB). To read AMD CPU temp/power, install
+**Windows** — to read AMD CPU temp/power, install
 [PawnIO](https://github.com/namazso/PawnIO) and run as Administrator.
 
 **Linux** — needs `pkg-config` + PulseAudio headers to build, and
