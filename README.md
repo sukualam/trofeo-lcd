@@ -2,9 +2,11 @@
 
 **English** · [Bahasa Indonesia](./README.id.md)
 
-Audio visualizer + system info monitor for the **Thermalright Trofeo Vision
-9.16 LCD** (USB `0416:5408`, "LY" protocol). The driver was rewritten
-byte-for-byte from [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
+**A lightweight, open-source alternative to the official Thermalright TRCC
+software.** Audio visualizer + system info monitor for the
+**Thermalright Trofeo Vision 9.16 LCD** (USB `0416:5408`, "LY" protocol).
+The driver was rewritten byte-for-byte from
+[thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
 
 The display **adapts automatically to what your computer is doing** — no
 manual switching needed. The Trofeo LCD shows one of these views below

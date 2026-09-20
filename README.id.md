@@ -2,6 +2,7 @@
 
 **Bahasa Indonesia** · [English](./README.md)
 
+**Alternatif ringan dan open-source untuk software resmi Thermalright TRCC.**
 Visualizer audio + monitor info sistem untuk layar **Thermalright Trofeo
 Vision 9.16 LCD** (USB `0416:5408`, protokol "LY"). Driver ditulis ulang
 byte-per-byte dari [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
