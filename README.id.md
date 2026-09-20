@@ -69,7 +69,7 @@ pengaturan default (idle FPS 2 / aktif 15, DeepCool aktif):
 
 | Metrik | Hasil ukur |
 |---|---|
-| Penggunaan CPU | ~2,5% satu core (≈0,2% dari total CPU) |
+| Penggunaan CPU | ≈0,2% dari total CPU |
 | RAM | ~13 MB working set (stabil, tidak membesar) |
 
 Ringannya ini berkat FPS adaptif (JPEG-encode + kirim USB hanya terjadi saat
