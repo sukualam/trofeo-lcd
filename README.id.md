@@ -39,6 +39,7 @@ Administrator.
 | `--deepcool-update-ms` | Interval kirim data DeepCool (100–2000 ms) | `1000` |
 | `--openrgb-device <NAMA>` | Sinkron warna dengan device OpenRGB | nonaktif |
 | `--hide-console` | Sembunyikan jendela terminal (Windows) | nonaktif |
+| `-k, --screenshot-key` | Global hotkey untuk menyimpan frame LCD sebagai tangkapan layar (f1-f12, printscreen) | off |
 
 ## Mode second monitor
 
