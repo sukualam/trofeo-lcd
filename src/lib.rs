@@ -45,6 +45,8 @@ use thiserror::Error;
 
 mod font;
 pub mod dxgi_capture;
+pub mod hotkey;
+pub mod png_save;
 
 pub const VENDOR_ID: u16 = 0x0416;
 /// Trofeo Vision 9.16 LCD.

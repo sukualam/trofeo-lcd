@@ -100,7 +100,7 @@ Program akan otomatis:
 | `-q`, `--quality <1-100>` | Kualitas kompresi gambar JPEG | `75` |
 | `-r`, `--rotate` | Putar tampilan 180° jika fisik layar dipasang terbalik | `false` |
 | `--hide-console` | Sembunyikan jendela hitam terminal (bagus untuk startup) | `false` |
-| `-k`, `--screenshot-key <KEY>` | Global hotkey untuk menyimpan tangkapan layar frame LCD (f1-f12, `printscreen`). File BMP lossless disimpan ke folder `screenshots/` | nonaktif |
+| `-k`, `--screenshot-key <KEY>` | Global hotkey untuk menyimpan tangkapan layar frame LCD (f1-f12, `printscreen`). File PNG lossless disimpan ke folder `screenshots/` | nonaktif |
 
 ### Contoh Penggunaan Khusus
 

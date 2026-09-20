@@ -35,6 +35,7 @@ use rustfft::num_complex::Complex32;
 use rustfft::FftPlanner;
 use sysinfo::System;
 use trofeo_lcd::{Framebuffer, LyLcd, TROFEO_VISION_9_16};
+use trofeo_lcd::{hotkey, png_save};
 
 /// Jumlah bar EQ yang digambar.
 const NUM_BARS: usize = 48;
@@ -164,6 +165,10 @@ struct Config {
     deepcool_enabled: bool,
     /// Interval pengiriman data ke display DeepCool, ms (dibatasi 100-2000).
     deepcool_update_ms: u64,
+    /// Global hotkey tangkapan layar LCD sebagai PNG ke folder `screenshots/`
+    /// — (virtual-key code, label asli dari argumen). `None` = NONAKTIF
+    /// (default); aktif hanya kalau `--screenshot-key` diberikan.
+    screenshot_key: Option<(u32, String)>,
 }
 
 fn print_help() {
@@ -207,6 +212,9 @@ fn print_help() {
          \x20\x20                          mulai jalan. Cocok dipakai lewat shortcut/\n\
          \x20\x20                          Task Scheduler saat login. Tidak menulis log\n\
          \x20\x20                          ke file. Hanya berlaku di Windows.\n\
+         \x20\x20-k, --screenshot-key <KEY>  Global hotkey untuk menyimpan tangkapan layar\n\
+         \x20\x20                          frame LCD sebagai PNG ke folder screenshots/\n\
+         \x20\x20                          (f1-f12 atau printscreen). Default: NONAKTIF.\n\
          \x20\x20-h, --help                Tampilkan bantuan ini"
     );
 }
@@ -284,6 +292,7 @@ fn parse_args() -> anyhow::Result<Config> {
     let mut hide_console = false;
     let mut deepcool_enabled = true;
     let mut deepcool_update_ms = DEFAULT_DEEPCOOL_UPDATE_MS;
+    let mut screenshot_key: Option<(u32, String)> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -319,6 +328,12 @@ fn parse_args() -> anyhow::Result<Config> {
                 deepcool_update_ms = next_u64(&mut args, "--deepcool-update-ms")?;
             }
             "--hide-console" => hide_console = true,
+            "-k" | "--screenshot-key" => {
+                let raw = args.next().ok_or_else(|| {
+                    anyhow::anyhow!("--screenshot-key butuh nama tombol (f1-f12, printscreen)")
+                })?;
+                screenshot_key = Some((hotkey::parse_key_name(&raw)?, raw.trim().to_ascii_lowercase()));
+            }
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -350,6 +365,7 @@ fn parse_args() -> anyhow::Result<Config> {
         hide_console,
         deepcool_enabled,
         deepcool_update_ms,
+        screenshot_key,
     })
 }
 
@@ -468,6 +484,23 @@ fn main() -> anyhow::Result<()> {
     // CPU menampilkan N/A.
     let cpu_freq = cpu_freq::CpuFreq::new();
 
+    // Hotkey tangkapan layar LCD (global, default NONAKTIF — aktif hanya
+    // kalau argumen --screenshot-key diberikan). Frame yang disimpan adalah
+    // frame visualizer terakhir yang tampil di layar.
+    let mut snap_hotkey: Option<hotkey::Hotkey> = None;
+    if let Some((vk, label)) = config.screenshot_key {
+        match hotkey::register(vk) {
+            Ok(h) => {
+                println!(
+                    "Hotkey tangkapan layar: {} (global) — tekan untuk menyimpan frame LCD sebagai PNG ke screenshots/",
+                    label.to_uppercase()
+                );
+                snap_hotkey = Some(h);
+            }
+            Err(e) => eprintln!("PERINGATAN: hotkey tangkapan layar tidak aktif: {e}"),
+        }
+    }
+
     // Sensor GPU AMD (suhu Edge, ASIC power, fan RPM) via ADL PMLog.
     // Graceful: kalau driver tidak ada / GPU bukan AMD, warning dan lanjut (N/A).
     let gpu_amd = gpu_amd::GpuAmdSensor::new();
@@ -531,8 +564,25 @@ fn main() -> anyhow::Result<()> {
     // kebetulan diam pas startup.
     let mut last_sound = Instant::now();
 
+    // Anti-spam antar dua tangkapan layar berurutan (ms) — mencegah menyimpan
+    // puluhan file saat tombol hotkey ditahan.
+    let mut last_snap = Instant::now() - Duration::from_millis(500);
+
     loop {
         let frame_start = Instant::now();
+
+        // Hotkey tangkapan layar (global — aktif walau jendela tidak fokus).
+        // `fb` masih berisi frame tayangan terakhir, jadi hasilnya sama persis
+        // dengan apa yang tampil di layar LCD.
+        if let Some(h) = &snap_hotkey {
+            if hotkey::triggered(h.id) && last_snap.elapsed() >= Duration::from_millis(500) {
+                match png_save::save(&fb, "trofeo_lcd") {
+                    Ok(p) => println!("Tangkapan layar disimpan: {}", p.display()),
+                    Err(e) => eprintln!("Gagal menyimpan tangkapan layar: {e}"),
+                }
+                last_snap = Instant::now();
+            }
+        }
 
         // 1) Ambil window audio terbaru, cek apakah lagi diam, & hitung spektrum.
         let samples = audio::take_latest(&audio_ring, FFT_SIZE);
