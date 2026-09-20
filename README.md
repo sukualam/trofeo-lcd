@@ -63,6 +63,20 @@ Requires a *Virtual Display Driver* (VDD) at 1920×462 — see
 - `src/dxgi_capture.rs` + `src/bin/screen.rs` — second monitor mode.
 - `src/main.rs` — main loop: audio → FFT → EQ bars → send to screen.
 
+## Performance
+
+Measured on a Windows PC (12 logical processors), running `trofeo_lcd` at
+default settings (idle FPS 2 / active 15, DeepCool enabled):
+
+| Metric | Measured |
+|---|---|
+| CPU usage | ~2.5% of one core (≈0.2% of the whole CPU) |
+| RAM | ~13 MB working set (stable, no growth) |
+
+It stays this light thanks to adaptive FPS (JPEG encode + USB transfer only
+happen while there is audio) and the CPU optimizations in `src/main.rs` /
+`src/lib.rs`.
+
 ## License
 
 GPL-3.0-or-later (follows the referenced upstream project).

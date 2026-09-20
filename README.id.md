@@ -62,6 +62,19 @@ Butuh *Virtual Display Driver* (VDD) 1920×462 — lihat
 - `src/dxgi_capture.rs` + `src/bin/screen.rs` — mode second monitor.
 - `src/main.rs` — loop utama: audio → FFT → bar EQ → kirim ke layar.
 
+## Performa
+
+Diukur pada PC Windows (12 logical processor), `trofeo_lcd` berjalan dengan
+pengaturan default (idle FPS 2 / aktif 15, DeepCool aktif):
+
+| Metrik | Hasil ukur |
+|---|---|
+| Penggunaan CPU | ~2,5% satu core (≈0,2% dari total CPU) |
+| RAM | ~13 MB working set (stabil, tidak membesar) |
+
+Ringannya ini berkat FPS adaptif (JPEG-encode + kirim USB hanya terjadi saat
+ada audio) dan optimasi CPU di `src/main.rs` / `src/lib.rs`.
+
 ## Lisensi
 
 GPL-3.0-or-later (mengikuti proyek upstream rujukan).
