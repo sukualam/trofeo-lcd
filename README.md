@@ -1,5 +1,7 @@
 # trofeo_lcd
 
+**Bahasa Indonesia** · [English](./README.en.md)
+
 Audio visualizer (bar EQ) + info sistem (CPU, RAM, jam, tanggal) untuk
 **Thermalright Trofeo Vision 9.16 LCD** (USB VID:PID `0416:5408`, protokol
 "LY" — chunked USB bulk; varian LY1 `0416:5409` juga didukung).
@@ -24,8 +26,15 @@ proyek [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc
   Windows lewat COM/WinRT, Linux lewat `pactl`/`playerctl`.
 - `src/foreground.rs` — deteksi nama program (.exe) yang sedang jadi window
   aktif, dipakai mode game: Windows lewat WinAPI, Linux lewat X11 (EWMH).
+- `src/cpu_freq.rs` — frekuensi CPU **real-time** (ikut beban/boost):
+  Windows lewat PDH `% Processor Performance` × base clock registry, Linux
+  lewat rata-rata `scaling_cur_freq` sysfs.
+- `src/deepcool/` — integrasi **DeepCool Digital**: kirim suhu/usage/power/
+  frekuensi CPU ke display cooler/casing DeepCool via USB HID (driver
+  di-port dari proyek deepcool-digital).
 - `src/main.rs` — program utama: loop capture audio → FFT → bar EQ +
-  info sistem → kirim ke layar.
+  info sistem → kirim ke layar. Juga men-dispatch data CPU ke thread
+  integrasi DeepCool di background.
 
 ## Linux — yang perlu dipasang
 
@@ -92,12 +101,48 @@ butuh driver tambahan). Yang butuh paket eksternal cuma:
   Uptime (`UP ...`) memakai `System::uptime()` dari `sysinfo` — panggilan
   statis yang cuma baca counter OS, bukan snapshot CPU/RAM yang mahal, jadi
   dihitung tiap frame tanpa ikut aturan `SYSINFO_REFRESH_INTERVAL`.
+- Frekuensi CPU real-time (ikut beban/boost) di bar info, dibaca via PDH
+  (`% Processor Performance` × base clock) di Windows atau sysfs cpufreq di
+  Linux — sama dengan angka "Speed" di Task Manager.
+
+## Integrasi DeepCool Digital
+
+Trofeo-lcd bisa sekaligus menggerakkan display **cooler/casing DeepCool**
+(mis. AG300/400/500/620 DIGITAL, AK/K/Pro, LS, LQ, LD, LP, CH/CH-Gen2,
+CH510) yang tersambung via USB HID — jadi **tidak perlu menjalankan program
+DeepCool terpisah**. Suhu/power/frekuensi yang ditampilkan memakai sensor
+yang sama dengan baris info (satu instance sensor, dibagi ke thread
+DeepCool) dan dikirim ke display setiap interval tertentu.
+
+Aktif secara default. Opsi:
+
+| Argumen | Fungsi | Default |
+|---|---|---|
+| `--no-deepcool` | Matikan integrasi DeepCool sepenuhnya | aktif |
+| `--deepcool-update-ms <N>` | Interval kirim data ke display, ms (di-clamp 100–2000) | `1000` |
+
+Device dideteksi otomatis (auto-detect setiap beberapa detik kalau belum
+ketemu). Kalau sensor suhu CPU tidak tersedia (mis. driver PawnIO belum
+terpasang di Windows), display akan menampilkan 0 — data lain tetap jalan.
+
+## Mode Second Monitor (`trofeo_screen`)
+
+Selain visualizer, ada binary terpisah **`trofeo_screen`** yang mengubah LCD
+Trofeo menjadi **monitor sekunder sungguhan**: tampilan desktop ditangkap
+real-time via DXGI Desktop Duplication dan di-stream ke LCD. Jendela aplikasi
+(Spotify, browser, dsb.) bisa digeser langsung ke layar Trofeo.
+
+Membutuhkan *Virtual Display Driver* (VDD) dengan resolusi **1920×462** —
+panduan lengkap (pemasangan VDD, opsi `--fps`/`--quality`/`--rotate`, dan
+autorun saat login) ada di **[GUIDE_SECOND_MONITOR.md](./GUIDE_SECOND_MONITOR.md)**.
+
+> ⚠️ `trofeo_lcd` dan `trofeo_screen` memakai LCD yang sama — jalankan
+> **salah satu**, jangan keduanya bersamaan.
 
 ## Optimasi CPU
 
 Beberapa titik yang tadinya boros CPU sudah dirapikan (semua sudah lolos
-`cargo test`, tapi belum diuji ulang di hardware/Windows nyata — lihat catatan
-di bawah):
+`cargo test`):
 
 - **Rentang bin FFT per bar** dulu dihitung ulang tiap frame di `compute_bars`
   (termasuk 2 panggilan `powf()` per bar = 96x/frame untuk 48 bar). Sekarang
@@ -192,14 +237,6 @@ OpenRGB. Konsekuensinya:
   warna di LCD tetap ikut berubah tapi "patah-patah" mengikuti
   `--openrgb-poll-ms`, bukan semulus animasi aslinya.
 
-> ⚠️ Belum tervalidasi di hardware/Windows/OpenRGB nyata (lihat catatan di
-> `src/openrgb_sync.rs`) — sandbox pengembangan cuma punya toolchain Rust
-> 1.75 (apt Ubuntu), sedangkan crate `openrgb2` butuh edition2024 / Rust
-> >=1.85, jadi bagian ini tidak ikut lolos `cargo check`/`cargo test` yang
-> sudah dijalankan untuk sisa proyek. Kodenya ditulis mengikuti dokumentasi
-> resmi `openrgb2` di docs.rs, tapi kabari kalau ada error compile atau
-> perilaku aneh saat dicoba di mesin Anda dengan Rust & OpenRGB asli.
-
 ## Sembunyikan jendela terminal (`--hide-console`)
 
 Secara default program tetap tampil di terminal seperti biasa (log
@@ -212,18 +249,9 @@ trofeo_lcd.exe --hide-console
 ```
 
 Begitu argumen selesai diparse, jendela konsol langsung disembunyikan
-(`FreeConsole`), dan seluruh log yang tadinya tampil di layar (termasuk
-pesan error) dialihkan ke file **`trofeo_lcd.log`** di folder yang sama
-dengan `trofeo_lcd.exe` (bukan ditulis ulang tiap start — selalu
-di-*append*, jadi hapus manual sesekali kalau sudah kepanjangan). Hanya
-berlaku di Windows; di build non-Windows opsi ini diabaikan dengan
-peringatan.
-
-> ⚠️ Sama seperti bagian OpenRGB di atas: bagian ini pakai Win32 API
-> (`SetStdHandle`/`FreeConsole` dari crate `windows`) yang juga belum
-> sempat dicompile-check di sandbox (perlu target Windows, sandbox ini
-> Linux). Ditulis mengikuti signature resmi di docs.rs — kabari kalau ada
-> masalah saat dicoba.
+(`FreeConsole`) — standar output/error tetap seperti biasa dan **tidak ada
+file log yang ditulis**. Hanya berlaku di Windows; di build non-Windows
+opsi ini diabaikan dengan peringatan.
 
 ## Instalasi dependensi sistem
 
@@ -289,6 +317,11 @@ Bar EQ akan mengikuti audio apa pun yang sedang diputar Windows (loopback
 device default) — tidak perlu setting tambahan, WASAPI loopback otomatis
 memakai output device default sistem.
 
+> ℹ️ Integrasi DeepCool butuh driver PawnIO untuk membaca suhu/power CPU
+> AMD di Windows (`winget install namazso.PawnIO`) — kalau belum ada, layar
+> DeepCool tetap jalan tapi menampilkan 0. Program juga harus dijalankan
+> sebagai Administrator untuk akses driver.
+
 ## Pakai (Linux/macOS)
 
 ```bash
@@ -299,24 +332,16 @@ cargo build --release
 Di Linux/macOS bar EQ memakai sumber sintetis (bukan audio asli) — lihat
 catatan di `src/audio.rs`.
 
-## Belum divalidasi di hardware/Windows nyata
+## Status pengujian
 
-Logika inti (FFT, bucketing frekuensi ke bar, normalisasi auto-gain, gambar
-teks bitmap) sudah diuji terpisah di sandbox ini dengan sinyal sintetis
-(nada 220/880/3000 Hz) dan hasilnya benar — puncak bar muncul tepat di
-frekuensi yang sesuai. Driver USB & unit test chunking/JPEG juga lolos
-semua (`cargo test`). **Tapi kode capture WASAPI loopback (`src/audio.rs`,
-modul `windows_loopback`) belum pernah benar-benar dijalankan di Windows**
-di sesi ini (sandbox tidak punya target/linker Windows dan tidak ada akses
-jaringan untuk `cargo build`/`cargo test` di sesi optimasi CPU terakhir),
-begitu juga pengiriman ke layar fisik dengan beban penuh (bar EQ + teks
-tiap frame) dan perubahan `Framebuffer::clear`/`fill_rect`/batching audio
-di atas. Semua perubahan itu sudah direview manual baris-per-baris, tapi
-kabari saya kalau ada error compile atau perilaku aneh (mis. warna
-salah/robek di layar) saat dicoba di hardware/Windows nyata.
-Kalau ada error terkait WASAPI (device tidak ketemu, format tidak didukung,
-dsb) atau soal kecepatan (`TARGET_FPS` terlalu tinggi untuk USB), kabari
-saya pesan errornya.
+- Logika inti (FFT, bucketing frekuensi ke bar, normalisasi auto-gain, gambar
+  teks bitmap) diuji terpisah dengan sinyal sintetis (nada 220/880/3000 Hz) —
+  puncak bar muncul tepat di frekuensi yang sesuai. Driver USB & unit test
+  chunking/JPEG lolos `cargo test` (`cargo check`/`cargo build --release`
+  bersih di Windows).
+- Build Windows berjalan di hardware nyata: LCD Trofeo Vision 9.16
+  (`0416:5408`), plus integrasi DeepCool dengan device AG Series
+  (`VID_3633 PID_0008`) yang terdeteksi otomatis.
 
 ## Lisensi
 
