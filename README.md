@@ -6,6 +6,12 @@ Audio visualizer + system info monitor for the **Thermalright Trofeo Vision
 9.16 LCD** (USB `0416:5408`, "LY" protocol). The driver was rewritten
 byte-for-byte from [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
 
+The Trofeo LCD showing what's on screen in its three default modes:
+
+![Idle — EQ idle & system info](img/idle.png)
+![Media — now playing](img/media.png)
+![Gaming — foreground game info](img/gaming.png)
+
 ## Features
 
 - EQ bars (48) from currently playing audio (WASAPI loopback on Windows,
