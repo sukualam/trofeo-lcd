@@ -8,8 +8,20 @@ byte-per-byte dari [thermalright-trcc-linux](https://github.com/Lexonight1/therm
 
 Layar Trofeo LCD saat menampilkan tampilannya dalam tiga mode default:
 
+**Idle** — audio sedang tenang, jadi bar EQ rendah dan baris atas
+menampilkan info sistem: usage & frekuensi real-time CPU, RAM, uptime, jam
+dan tanggal.
+
 ![Idle — EQ idle & info sistem](img/idle.png)
+
+**Media** — sedang ada lagu diputar: bar mengikuti musik, dan baris atas
+menampilkan lagu yang sedang jalan (judul/artis/album dari kontrol media).
+
 ![Media — lagu sedang diputar](img/media.png)
+
+**Gaming** — ada game di foreground: info game terdeteksi dan status sistem
+(CPU/GPU/RAM/temp) tetap terbaca selagi bermain.
+
 ![Gaming — info game di foreground](img/gaming.png)
 
 ## Fitur

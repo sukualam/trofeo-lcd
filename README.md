@@ -8,8 +8,19 @@ byte-for-byte from [thermalright-trcc-linux](https://github.com/Lexonight1/therm
 
 The Trofeo LCD showing what's on screen in its three default modes:
 
+**Idle** — audio is quiet, so the EQ bars are low and the top bar shows
+system info: CPU usage & real-time frequency, RAM, uptime, clock and date.
+
 ![Idle — EQ idle & system info](img/idle.png)
+
+**Media** — a song is playing: the stripes follow the music, and the top bar
+shows the now-playing track (title/artist/album from the media controls).
+
 ![Media — now playing](img/media.png)
+
+**Gaming** — a game is in the foreground: game info is detected and the
+system status (CPU/GPU/RAM/temp) stays readable while playing.
+
 ![Gaming — foreground game info](img/gaming.png)
 
 ## Features
