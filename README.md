@@ -61,7 +61,7 @@ cargo build --release
 | `--deepcool-update-ms` | DeepCool send interval (100–2000 ms) | `1000` |
 | `--openrgb-device <NAME>` | Sync color with an OpenRGB device | disabled |
 | `--hide-console` | Hide the console window (Windows) | disabled |
-| `-k, --screenshot-key` | Global hotkey to save the current LCD frame as a lossless PNG screenshot (f1-f12, printscreen) | off |
+| `-k, --screenshot-key` | Global hotkey to save the current LCD frame as a screenshot — **lossless PNG** (deflate-compressed, so still pixel-perfect; a flat screen ~10 KB instead of 2.6 MB raw) (f1-f12, printscreen) | off |
 
 ## Second monitor mode
 
