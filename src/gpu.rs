@@ -186,7 +186,40 @@ mod imp {
     }
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+mod imp {
+    //! GPU usage di macOS diambil dari `PerformanceStatistics` milik driver AMD
+    //! (`GPU Activity(%)`) — angka yang sudah dihitung driver itu sendiri, jadi
+    //! bukan estimasi kita. Di-cache sebentar di `amd_gpu_macos::read()` supaya
+    //! `gpu_amd.rs` yang dipanggil pada loop refresh yang sama tidak mengulang
+    //! `ioreg`.
+    //!
+    //! Untuk GPU Intel/NVIDIA tidak ada sumber yang setara di IOKit registry,
+    //! jadi hasilnya `Ok(0.0)` — sama dengan stub platform lain.
+
+    pub struct GpuMonitor {
+        supported: bool,
+    }
+
+    impl GpuMonitor {
+        pub fn new() -> anyhow::Result<Self> {
+            Ok(Self {
+                supported: crate::amd_gpu_macos::driver_present(),
+            })
+        }
+
+        pub fn sample(&mut self) -> anyhow::Result<f32> {
+            if !self.supported {
+                return Ok(0.0);
+            }
+            Ok(crate::amd_gpu_macos::read()
+                .and_then(|s| s.activity_pct)
+                .unwrap_or(0) as f32)
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 mod imp {
     /// Stub platform lain: GPU usage tidak tersedia, selalu `Ok(0.0)`.
     pub struct GpuMonitor;

@@ -15,7 +15,15 @@
 //!
 //! Tuning cepat lainnya ada di konstanta `NUM_BARS`, `FFT_SIZE`, dll di bawah.
 
+#[cfg(target_os = "macos")]
+mod smc_macos;
 mod audio;
+#[cfg(target_os = "macos")]
+mod amd_gpu_macos;
+#[cfg(target_os = "macos")]
+mod audio_macos;
+#[cfg(target_os = "macos")]
+mod amd_pm_macos;
 mod cpu_freq;
 mod cpu_sensor;
 mod deepcool;
@@ -507,10 +515,10 @@ fn main() -> anyhow::Result<()> {
     let mut latest_gpu_data = gpu_amd::GpuAmdData::default();
 
     let audio_ring = audio::spawn_capture()?;
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     println!(
-        "PERINGATAN: build ini bukan Windows/Linux, jadi bar EQ memakai sumber audio \
-         sintetis (bukan audio asli) — lihat src/audio.rs."
+        "PERINGATAN: platform ini tidak punya jalur loopback audio, jadi bar EQ \
+         memakai sumber sintetis (bukan audio asli) — lihat src/audio.rs."
     );
 
     // Monitor tambahan: GPU usage, network+disk IO, volume, judul lagu/media.
