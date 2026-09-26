@@ -245,8 +245,62 @@ struct Inner {
 struct Inner {
     imp: imp::Inner,
 }
-#[cfg(not(any(windows, target_os = "linux")))]
-struct Inner(());
+#[cfg(target_os = "macos")]
+struct Inner {
+    imp: imp::Inner,
+}
+/// Sumber frekuensi CPU di macOS.
+///
+/// **Penting: ini frekuensi NOMINAL (base clock), bukan real-time.**
+///
+/// Di Mac Intel asli, frekuensi real-time diambil dari array performance state
+/// `AppleIntelCPUProcessor`, yang dipetakan ke P-state aktif. Di Hackintosh
+/// kext itu tidak ada, dan tidak ada `PerformanceStateArray` di
+/// `IOPMrootDomain`, jadi jalur itu tidak tersedia. `powermetrics` yang bisa
+/// memberi angka real-time butuh root, dan sampling-nya berbasis XCP Intel
+/// yang tidak ada di Ryzen.
+///
+/// Yang tersisa cuma `hw.cpufrequency` — dan itu **statis**: sudah diuji di
+/// mesin ini, nilainya tetap 3700000000 Hz baik saat CPU idle maupun dibebani
+/// penuh. Jadi angka ini tidak akan bergerak mengikuti boost.
+///
+/// Pada Ryzen 5 7500F yang sebenarnya berjalan 3,7-5,0 GHz, dan angka ini
+/// lagi-lagi berasal dari SMBIOS MacPro7,1 yang disamarkan, jadi 3,70 GHz di
+/// sini adalah nilai base yang diwarisi firmware, bukan base clock asli CPU.
+#[cfg(target_os = "macos")]
+mod imp {
+    pub(super) struct Inner;
+
+    impl Inner {
+        pub(super) fn new() -> Option<Self> {
+            if !crate::amd_pm_macos::kext_present() {
+                eprintln!(
+                    "PERINGATAN: kext AMDRyzenCPUPowerManagement tidak ditemukan — \
+                     frekuensi CPU real-time tidak tersedia."
+                );
+                return None;
+            }
+            Some(Self)
+        }
+
+        /// Frekuensi **real-time** per core (MHz), dirata-ratakan, dari kext
+        /// power management.
+        ///
+        /// Jalur yang sama dengan aplikasi resmi "AMD Power Gadget":
+        /// `AMDRyzenCPUPMUserClient` selector 4 mengembalikan
+        /// `[power, temp, pstate, freq_mhz_per_core...]` dalam satu panggilan.
+        ///
+        /// Membaca selector ini butuh hak root — kext membalas
+        /// `kIOReturnNotPrivileged` untuk proses biasa, dan itu ditangani
+        /// sebagai "tidak ada data" (LCD menampilkan N/A), bukan error fatal.
+        pub(super) fn sample_mhz(&self) -> Option<u32> {
+            crate::amd_pm_macos::shared_client()?
+                .metrics()
+                .ok()
+                .and_then(|m| m.avg_freq_mhz())
+        }
+    }
+}
 
 /// Monitor frekuensi CPU real-time. Di platform yang tidak didukung, semua
 /// method graceful return `None` — program tetap jalan, data tampil "N/A".
@@ -270,12 +324,22 @@ impl CpuFreq {
                 inner: imp::Inner::new().map(|imp| Inner { imp }),
             };
         }
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(target_os = "macos")]
+        {
+            return CpuFreq {
+                inner: imp::Inner::new().map(|imp| Inner { imp }),
+            };
+        }
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         CpuFreq { inner: None }
     }
 
-    /// Frekuensi CPU saat ini dalam MHz (real-time, ikut beban/boost).
-    /// `None` kalau belum ada data valid / tidak didukung.
+    /// Frekuensi CPU dalam MHz.
+    ///
+    /// Di Windows dan Linux ini real-time (ikut beban/boost). Di macOS hanya
+    /// frekuensi **nominal/base clock** yang tersedia, dan angka itu tidak
+    /// bergerak — lihat catatan panjang di modul `imp` di bawah. `None` kalau
+    /// belum ada data valid / tidak didukung.
     pub fn sample_mhz(&self) -> Option<u32> {
         #[cfg(windows)]
         {
@@ -285,7 +349,38 @@ impl CpuFreq {
         {
             return self.inner.as_ref()?.imp.sample_mhz();
         }
+        #[cfg(target_os = "macos")]
+        {
+            return self.inner.as_ref()?.imp.sample_mhz();
+        }
         #[allow(unreachable_code)]
         None
+    }
+}
+#[cfg(all(test, target_os = "macos"))]
+mod macos_tests {
+    use super::*;
+
+    /// Kext-nya harus terdeteksi (user client bisa dibuka tanpa root —
+    /// privilege check terjadi saat memanggil selector, bukan saat open).
+    #[test]
+    fn kext_is_detected() {
+        assert!(
+            imp::Inner::new().is_some(),
+            "AMDRyzenCPUPowerManagement tidak terdeteksi"
+        );
+    }
+
+    /// Pembacaan real-time butuh root. Sebagai user biasa hasilnya `None`
+    /// (LCD menampilkan N/A) — itu perilaku yang benar, bukan kegagalan.
+    #[test]
+    fn sample_is_none_without_root() {
+        let Some(inner) = imp::Inner::new() else {
+            return;
+        };
+        match inner.sample_mhz() {
+            Some(mhz) => println!("terbaca (privileged): {mhz} MHz"),
+            None => println!("None — tidak punya hak akses (sesuai harapan)"),
+        }
     }
 }

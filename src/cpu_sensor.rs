@@ -295,6 +295,8 @@ struct Inner {
 type PlatformInner = Inner;
 #[cfg(target_os = "linux")]
 type PlatformInner = Inner;
+// macOS membaca lewat SMC (crate::smc_macos) yang statusnya global, jadi
+// tidak ada state per-instance dan `()` sudah cukup.
 #[cfg(not(any(windows, target_os = "linux")))]
 type PlatformInner = ();
 
@@ -391,7 +393,24 @@ impl CpuSensor {
             return CpuSensor { inner: Some(Inner { temp_path, power_source }) };
         }
 
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(target_os = "macos")]
+        {
+            // SMC tidak butuh state per-instance, tapi kita tetap cek sekali di
+            // sini supaya pengguna dapat pesan jelas kalau VirtualSMC belum
+            // terpasang, alih-alih diam-diam menampilkan N/A.
+            if !crate::smc_macos::smc_available() {
+                eprintln!(
+                    "PERINGATAN: SMC tidak bisa dibuka — sensor suhu CPU tidak tersedia. \
+                     Di Hackintosh pastikan VirtualSMC + SMCAMDProcessor terpasang dan \
+                     dijalankan (Lilu, VirtualSMC, SMCAMDProcessor)."
+                );
+            }
+            // SMC dibaca lewat fungsi global, jadi tidak ada state yang perlu
+            // disimpan di `inner`.
+            return CpuSensor { inner: None };
+        }
+
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         CpuSensor { inner: None }
     }
 
@@ -427,6 +446,14 @@ impl CpuSensor {
             let path = inner.temp_path.as_ref()?;
             let milli_c = imp::read_u64(path)? as f32;
             return Some(milli_c / 1000.0);
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // Suhu CPU lewat key SMC (TC0P dan sejenisnya), yang diisi oleh
+            // VirtualSMC + SMCAMDProcessor di Hackintosh, atau firmware Apple
+            // di Mac Intel asli. Lihat src/smc_macos.rs.
+            return crate::smc_macos::cpu_temp_c();
         }
 
         #[allow(unreachable_code)]
@@ -473,6 +500,10 @@ impl CpuSensor {
                 }
             }
         }
+        // macOS: VirtualSMC mengekspos key suhu, tapi counter energi kumulatif
+        // untuk CPU tidak ada padanannya (firmware Apple hanya mengisinya di
+        // Intel Mac lewat MSR, dan Hackintosh tidak punya akses itu). Jadi
+        // power CPU dihitung N/A di platform ini — lihat `calc_power_watts`.
         0
     }
 
@@ -516,6 +547,13 @@ impl CpuSensor {
                     }
                     let current = self.sample_energy();
                     let delta_uj = current.wrapping_sub(prev_energy);
+                    if delta_uj == 0 {
+                        // Counter RAPL tidak bergerak: driver tidak aktif, atau
+                        // zona paket tidak didukung CPU ini. Menghasilkan
+                        // 0,00 W akan menampilkan "0 W" yang menyesatkan —
+                        // lebih baik N/A.
+                        return None;
+                    }
                     let joules = delta_uj as f64 / 1_000_000.0;
                     let watts = joules / (delta_ms as f64 / 1000.0);
                     Some(watts.clamp(0.0, 9999.0) as f32)
@@ -528,7 +566,18 @@ impl CpuSensor {
             };
         }
 
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(target_os = "macos")]
+        {
+            // Daya CPU datang dari kext AMDRyzenCPUPowerManagement, yang sudah
+            // menghitung Watt dari MSR RAPL (0xC001029B) — bukan dari selisih
+            // counter energi, jadi `prev_energy`/`delta_ms` tidak dipakai.
+            let _ = (prev_energy, delta_ms);
+            return crate::amd_pm_macos::shared_client()
+                .and_then(|c| c.metrics().ok())
+                .and_then(|m| m.power_w);
+        }
+
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         {
             let _ = (prev_energy, delta_ms);
         }
