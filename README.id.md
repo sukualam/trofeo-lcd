@@ -30,7 +30,8 @@ menampilkan lagu yang sedang jalan (judul/artis/album dari kontrol media).
 ## Fitur
 
 - Bar EQ (48 bar) dari audio yang sedang diputar (WASAPI loopback di
-  Windows, PulseAudio/PipeWire di Linux), warna hijau→kuning→merah.
+  Windows, PulseAudio/PipeWire di Linux, Core Audio process tap di macOS),
+  warna hijau→kuning→merah.
 - Info sistem: CPU %, frekuensi CPU real-time, RAM, uptime, jam & tanggal.
 - Bisa sekaligus menyalakan display **DeepCool** (kirim data CPU via HID).
 - **Mode second monitor** (`trofeo_screen`): LCD jadi monitor sekunder asli.
@@ -50,6 +51,11 @@ Administrator.
 
 **Linux** — butuh `pkg-config` + header PulseAudio saat build, dan
 `playerctl` untuk judul lagu. Izin USB tanpa `sudo`: pasang `99-trofeo-lcd.rules` (lihat isi filenya).
+
+**macOS** — tidak perlu install apa pun: audio sistem diambil dari Core Audio
+process tap (native sejak 14.2, tanpa driver virtual dan tanpa dialog izin).
+Jalankan sebagai `root` hanya jika mau power CPU + frekuensi real-time;
+tanpa itu dua field itu tampil `N/A` dan sisanya tetap jalan normal.
 
 ## Opsi utama
 
@@ -78,11 +84,14 @@ Butuh *Virtual Display Driver* (VDD) 1920×462 — lihat
 ## Struktur
 
 - `src/lib.rs` — driver USB: handshake, chunking, JPEG encode, `Framebuffer`.
-- `src/audio.rs` — capture audio (WASAPI / PulseAudio-PipeWire).
+- `src/audio.rs` — capture audio (WASAPI / PulseAudio-PipeWire / Core Audio tap).
 - `src/cpu_sensor.rs`, `src/cpu_freq.rs` — suhu/power & frekuensi CPU.
 - `src/deepcool/` — driver display DeepCool (HID).
 - `src/dxgi_capture.rs` + `src/bin/screen.rs` — mode second monitor.
 - `src/main.rs` — loop utama: audio → FFT → bar EQ → kirim ke layar.
+- `src/audio_macos.rs`, `src/smc_macos.rs`, `src/amd_pm_macos.rs`,
+  `src/amd_gpu_macos.rs` — backend macOS (volume ada di `src/media.rs`,
+  network/disk di `src/netdisk.rs`).
 
 ## Performa
 

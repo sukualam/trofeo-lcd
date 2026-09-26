@@ -30,7 +30,8 @@ system status (CPU/GPU/RAM/temp) stays readable while playing.
 ## Features
 
 - EQ bars (48) from currently playing audio (WASAPI loopback on Windows,
-  PulseAudio/PipeWire on Linux), colored green→yellow→red.
+  PulseAudio/PipeWire on Linux, Core Audio process tap on macOS), colored
+  green→yellow→red.
 - System info: CPU %, real-time CPU frequency, RAM, uptime, clock & date.
 - Can also drive a **DeepCool** display (sends CPU data over HID).
 - **Second monitor mode** (`trofeo_screen`): the LCD becomes a real second
@@ -51,6 +52,11 @@ cargo build --release
 **Linux** — needs `pkg-config` + PulseAudio headers to build, and
 `playerctl` for song titles. For USB access without `sudo`, install
 `99-trofeo-lcd.rules` (see the file's contents).
+
+**macOS** — no extra install needed: system audio comes from a Core Audio
+process tap (native since 14.2, no virtual driver and no permission prompt).
+Run as `root` only if you want CPU power + real-time frequency; without it
+those two fields show `N/A` and everything else works.
 
 ## Main options
 
@@ -79,11 +85,14 @@ Requires a *Virtual Display Driver* (VDD) at 1920×462 — see
 ## Structure
 
 - `src/lib.rs` — USB driver: handshake, chunking, JPEG encode, `Framebuffer`.
-- `src/audio.rs` — audio capture (WASAPI / PulseAudio-PipeWire).
+- `src/audio.rs` — audio capture (WASAPI / PulseAudio-PipeWire / Core Audio tap).
 - `src/cpu_sensor.rs`, `src/cpu_freq.rs` — CPU temp/power & frequency.
 - `src/deepcool/` — DeepCool display drivers (HID).
 - `src/dxgi_capture.rs` + `src/bin/screen.rs` — second monitor mode.
 - `src/main.rs` — main loop: audio → FFT → EQ bars → send to screen.
+- `src/audio_macos.rs`, `src/smc_macos.rs`, `src/amd_pm_macos.rs`,
+  `src/amd_gpu_macos.rs` — macOS backends (see `src/media.rs` & `src/netdisk.rs`
+  for the volume and network/disk paths).
 
 ## Performance
 
