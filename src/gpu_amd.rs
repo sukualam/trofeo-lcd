@@ -423,6 +423,45 @@ mod imp {
 }
 
 // ---------------------------------------------------------------------------
+#[cfg(target_os = "macos")]
+mod imp {
+    //! Sensor GPU AMD di macOS dibaca dari satu dictionary
+    //! `PerformanceStatistics` di IOKit registry — parser dan cache-nya ada di
+    //! `crate::amd_gpu_macos` karena `gpu.rs` (GPU usage %) memakai sumber yang
+    //! persis sama.
+    //!
+    //! Dua field memang selalu `None` di sini:
+    //! - **Hotspot/junction** — driver macOS tidak mengekspos sensor terpisah
+    //!   untuknya, hanya satu suhu die.
+    //! - **Fullscreen FPS** — butuh ADL FrameMetrics, itu API Windows. Sama
+    //!   seperti di Linux, tidak ada padanannya.
+
+    /// Penanda "node AMD ditemukan". Nilai sensor per-sampling tidak
+    /// disimpan di sini karena diambil ulang tiap call (dicache di
+    /// `amd_gpu_macos`).
+    pub(super) struct GpuAmdInner {
+        _present: bool,
+    }
+
+    impl GpuAmdInner {
+        pub(super) fn new() -> Option<Self> {
+            crate::amd_gpu_macos::driver_present().then_some(Self { _present: true })
+        }
+
+        pub(super) fn sample(&self) -> super::GpuAmdData {
+            let stats = crate::amd_gpu_macos::read();
+            super::GpuAmdData {
+                temp_edge_c: stats.and_then(|s| s.temp_c),
+                temp_hotspot_c: None,
+                power_w: stats.and_then(|s| s.power_w),
+                fan_rpm: stats.and_then(|s| s.fan_rpm),
+                fps: None,
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 /// Hasil satu pembacaan sensor GPU AMD.
 /// Semua field `Option` — `None` kalau sensor tidak didukung GPU/driver ini,
@@ -448,7 +487,9 @@ pub struct GpuAmdData {
 type GpuAmdInnerAlias = imp::GpuAmdInner;
 #[cfg(target_os = "linux")]
 type GpuAmdInnerAlias = imp::GpuAmdInner;
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+type GpuAmdInnerAlias = imp::GpuAmdInner;
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 type GpuAmdInnerAlias = ();
 
 /// Wrapper publik `GpuAmdSensor` — selalu bisa di-construct di semua platform,
@@ -488,15 +529,35 @@ impl GpuAmdSensor {
             return GpuAmdSensor { inner };
         }
 
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(target_os = "macos")]
+        {
+            let inner = imp::GpuAmdInner::new();
+            if inner.is_none() {
+                eprintln!(
+                    "GPU AMD IOKit: tidak ada node AMDRadeon di IORegistry — \
+                     pastikan GPU-nya AMD dan driver Radeon-nya terpasang \
+                     (cek: ioreg -c IOAccelerator). Suhu/power/fan GPU akan N/A."
+                );
+            }
+            return GpuAmdSensor { inner };
+        }
+
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         GpuAmdSensor { inner: None }
     }
 
     /// Baca sensor. Dipanggil tiap sysinfo refresh interval (~500 ms),
     /// bukan tiap frame — biayanya memang ringan tapi tidak perlu tiap frame.
     pub fn sample(&self) -> GpuAmdData {
-        if let Some(inner) = &self.inner {
-            return inner.sample();
+        // Guard di sini wajib: di platform selain Windows/Linux/macOS,
+        // `GpuAmdInnerAlias` di-typedef jadi `()`, jadi `inner` bertipe `&()`
+        // yang tidak punya method `sample()`. Tanpa cfg, Rust tetap
+        // men-type-check cabang `if let` walau nilainya mustahil terjadi.
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+        {
+            if let Some(inner) = &self.inner {
+                return inner.sample();
+            }
         }
         GpuAmdData::default()
     }
