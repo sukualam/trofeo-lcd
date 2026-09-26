@@ -32,7 +32,8 @@ const RING_CAPACITY: usize = SAMPLE_RATE as usize / 2;
 
 pub type SharedRing = Arc<Mutex<VecDeque<f32>>>;
 
-fn push_mono_samples(ring: &SharedRing, samples: impl Iterator<Item = f32>) {
+/// Dipakai juga oleh `audio_macos` (loopback Core Audio) — makanya `pub(crate)`.
+pub(crate) fn push_mono_samples(ring: &SharedRing, samples: impl Iterator<Item = f32>) {
     let mut buf = ring.lock().expect("audio ring mutex poisoned");
     for s in samples {
         if buf.len() >= RING_CAPACITY {
@@ -93,7 +94,19 @@ pub fn spawn_capture() -> anyhow::Result<SharedRing> {
             })?;
     }
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        let ring_clone = ring.clone();
+        std::thread::Builder::new()
+            .name("audio-capture-tap".into())
+            .spawn(move || {
+                if let Err(e) = macos_loopback::run(ring_clone) {
+                    eprintln!("Capture audio (Core Audio process tap) gagal: {e:#}");
+                }
+            })?;
+    }
+
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let ring_clone = ring.clone();
         std::thread::Builder::new()
@@ -277,9 +290,14 @@ mod linux_loopback {
 }
 
 /// Sumber sintetis untuk OS selain Windows & Linux, supaya kode ini tetap
-/// bisa di-compile & dijalankan (tanpa audio nyata) di sana. Linux punya
-/// jalur asli sendiri, lihat `linux_loopback` di atas.
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+#[cfg(target_os = "macos")]
+use crate::audio_macos as macos_loopback;
+
+/// Fallback untuk platform tanpa jalur loopback asli: hanya supaya kode bisa
+/// di-compile & dijalankan (tanpa audio nyata) di sana. macOS punya jalur
+/// asli sendiri (`macos_loopback`), Linux juga (lihat `linux_loopback`).
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 mod fallback {
     use super::{push_mono_samples, SharedRing, SAMPLE_RATE};
     use std::f32::consts::PI;

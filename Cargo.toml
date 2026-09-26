@@ -87,3 +87,25 @@ libpulse-simple-binding = "2.28"
 # native, atau XWayland untuk aplikasi non-native-Wayland). Di sesi Wayland
 # murni, foreground_exe_name() akan selalu None (lihat catatan di file itu).
 x11rb = "0.13"
+
+[target."cfg(target_os = \"macos\")".dependencies]
+# Loopback audio system lewat Core Audio "process tap" (API native macOS
+# 14.2+, tidak butuh BlackHole maupun izin Screen Recording) — lihat
+# src/audio_macos.rs. Device diambil lewat cpal, tapi sample dibaca langsung dari
+# aggregate device dengan FFI karena aggregate device bersifat private sehingga
+# tidak terlihat oleh enumerator cpal.
+cpal = "0.18"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString"] }
+objc2-core-foundation = { version = "0.3", features = ["CFDictionary", "CFString", "CFArray", "CFBase"] }
+objc2-core-audio = { version = "0.3", default-features = false, features = [
+    "std",
+    "AudioHardware",
+    "AudioHardwareDeprecated",
+    "objc2",
+    "objc2-foundation",
+] }
+objc2-core-audio-types = { version = "0.3", default-features = false, features = [
+    "std",
+    "CoreAudioBaseTypes",
+] }
