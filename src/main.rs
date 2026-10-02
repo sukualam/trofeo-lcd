@@ -42,7 +42,7 @@ use chrono::Local;
 use rustfft::num_complex::Complex32;
 use rustfft::FftPlanner;
 use sysinfo::System;
-use trofeo_lcd::{Framebuffer, LyLcd, TROFEO_VISION_9_16};
+use trofeo_lcd::{Framebuffer, LyLcd, Resolution, Rotation, TROFEO_VISION_9_16};
 use trofeo_lcd::{hotkey, png_save};
 
 /// Jumlah bar EQ yang digambar.
@@ -125,12 +125,19 @@ const DEFAULT_SILENCE_TIMEOUT_MS: u64 = 800;
 /// Seberapa sering info sistem (CPU/mem, lumayan mahal) di-refresh.
 const SYSINFO_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Override manual rotasi layar. Ganti jadi `true` kalau tampilan di layar
-/// Anda kebalik (upside-down); `false` kalau sudah benar. Field
-/// `Handshake::rotate_180` bawaan SELALU `false` (heuristik otomatisnya
-/// terbukti tidak bisa diandalkan di hardware nyata) — jadi ini satu-satunya
-/// tempat untuk mengatur rotasi.
-const ROTATE_180_OVERRIDE: bool = false;
+fn parse_rotation(deg: u32) -> anyhow::Result<Rotation> {
+    match deg {
+        0 => Ok(Rotation::Deg0),
+        90 => Ok(Rotation::Deg90),
+        180 => Ok(Rotation::Deg180),
+        270 => Ok(Rotation::Deg270),
+        other => anyhow::bail!("--rotate: {other} tidak valid (pakai 0, 90, 180, atau 270)"),
+    }
+}
+
+fn is_portrait(rotation: Rotation) -> bool {
+    matches!(rotation, Rotation::Deg90 | Rotation::Deg270)
+}
 
 /// Mode warna bar EQ: gradien default (hijau->kuning->merah berdasarkan
 /// level), atau satu warna custom tetap (kecerahannya tetap mengikuti level
@@ -177,6 +184,8 @@ struct Config {
     /// — (virtual-key code, label asli dari argumen). `None` = NONAKTIF
     /// (default); aktif hanya kalau `--screenshot-key` diberikan.
     screenshot_key: Option<(u32, String)>,
+    /// Rotasi layar (0/90/180/270 derajat).
+    rotation: Rotation,
 }
 
 fn print_help() {
@@ -223,6 +232,8 @@ fn print_help() {
          \x20\x20-k, --screenshot-key <KEY>  Global hotkey untuk menyimpan tangkapan layar\n\
          \x20\x20                          frame LCD sebagai PNG ke Desktop\n\
          \x20\x20                          (f1-f12 atau printscreen). Default: NONAKTIF.\n\
+         \x20\x20--rotate <DERAJAT>        Rotasi layar: 0, 90, 180, atau 270\n\
+         \x20\x20                          (default: 0 / tidak diputar).\n\
          \x20\x20-h, --help                Tampilkan bantuan ini"
     );
 }
@@ -301,6 +312,7 @@ fn parse_args() -> anyhow::Result<Config> {
     let mut deepcool_enabled = true;
     let mut deepcool_update_ms = DEFAULT_DEEPCOOL_UPDATE_MS;
     let mut screenshot_key: Option<(u32, String)> = None;
+    let mut rotation = Rotation::Deg0;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -342,6 +354,15 @@ fn parse_args() -> anyhow::Result<Config> {
                 })?;
                 screenshot_key = Some((hotkey::parse_key_name(&raw)?, raw.trim().to_ascii_lowercase()));
             }
+            "--rotate" => {
+                let raw = args.next().ok_or_else(|| {
+                    anyhow::anyhow!("--rotate butuh satu nilai derajat setelahnya (0, 90, 180, 270)")
+                })?;
+                let deg: u32 = raw.parse().map_err(|_| {
+                    anyhow::anyhow!("--rotate: '{raw}' bukan angka yang valid")
+                })?;
+                rotation = parse_rotation(deg)?;
+            }
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -374,6 +395,7 @@ fn parse_args() -> anyhow::Result<Config> {
         deepcool_enabled,
         deepcool_update_ms,
         screenshot_key,
+        rotation,
     })
 }
 
@@ -430,8 +452,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let lcd = LyLcd::open()?;
-    let mut hs = lcd.handshake()?;
-    hs.rotate_180 = ROTATE_180_OVERRIDE;
+    let hs = lcd.handshake()?;
     println!("Terhubung: {:?}, PM={} SUB={}", lcd.variant(), hs.pm, hs.sub);
     println!(
         "FPS: idle={:.1} aktif={:.1} (silence-threshold={} timeout={}ms)",
@@ -553,17 +574,11 @@ fn main() -> anyhow::Result<()> {
     let mut planner = FftPlanner::<f32>::new();
     let fft = planner.plan_fft_forward(FFT_SIZE);
     let hann = hann_window(FFT_SIZE);
-    // Rentang bin FFT per bar (tergantung FREQ_MIN/FREQ_MAX/NUM_BARS/FFT_SIZE,
-    // semuanya konstan) dihitung SEKALI di sini, bukan tiap frame — menghindari
-    // panggilan `powf()` berulang (transcendental, relatif mahal) di hot loop.
     let bar_bins = precompute_bar_bins(FFT_SIZE);
 
     let mut bar_heights = vec![0f32; NUM_BARS];
     let mut running_max: f32 = 1e-6;
 
-    // Framebuffer dialokasikan SEKALI di luar loop lalu dipakai ulang tiap
-    // frame (cuma di-`clear()`, bukan realokasi Vec ~2.6MB 15x/detik) —
-    // mengurangi churn heap & page fault yang tidak perlu.
     let mut fb = Framebuffer::new(resolution);
 
     // Kapan terakhir kali ada suara (bukan diam) terdeteksi. Diinisialisasi
@@ -684,39 +699,90 @@ fn main() -> anyhow::Result<()> {
         };
 
         fb.clear(0x08, 0x08, 0x10);
-        if gaming_mode {
-            draw_game_dashboard(
+
+        if is_portrait(config.rotation) {
+            let mut portrait_fb = Framebuffer::new(Resolution::new(
+                TROFEO_VISION_9_16.height,
+                TROFEO_VISION_9_16.width,
+            ));
+            portrait_fb.clear(0x08, 0x08, 0x10);
+
+            if gaming_mode {
+                draw_game_dashboard(
+                    &mut portrait_fb,
+                    &sys,
+                    latest_gpu_percent,
+                    &latest_gpu_data,
+                    latest_cpu_temp,
+                    latest_cpu_power,
+                    latest_cpu_mhz,
+                    color_mode,
+                    config.rotation,
+                );
+            } else if is_idle {
+                draw_idle_clock(&mut portrait_fb, color_mode, config.rotation);
+            } else {
+                draw_bars(&mut portrait_fb, &bar_heights, color_mode, config.rotation);
+            }
+            draw_status_lines(
+                &mut portrait_fb,
+                &sys,
+                latest_gpu_percent,
+                &latest_gpu_data,
+                latest_net_kb,
+                latest_disk_mb,
+                latest_volume,
+                latest_cpu_temp,
+                latest_cpu_power,
+                latest_cpu_mhz,
+                now_playing_title.as_deref(),
+                &mut now_playing_marquee,
+                config.rotation,
+            );
+
+            let rotated = match config.rotation {
+                Rotation::Deg90 => portrait_fb.rotated_270(),
+                Rotation::Deg270 => portrait_fb.rotated_90(),
+                _ => unreachable!(),
+            };
+            fb.as_bytes_mut().copy_from_slice(rotated.as_bytes());
+        } else {
+            if gaming_mode {
+                draw_game_dashboard(
+                    &mut fb,
+                    &sys,
+                    latest_gpu_percent,
+                    &latest_gpu_data,
+                    latest_cpu_temp,
+                    latest_cpu_power,
+                    latest_cpu_mhz,
+                    color_mode,
+                    config.rotation,
+                );
+            } else if is_idle {
+                draw_idle_clock(&mut fb, color_mode, config.rotation);
+            } else {
+                draw_bars(&mut fb, &bar_heights, color_mode, config.rotation);
+            }
+            draw_status_lines(
                 &mut fb,
                 &sys,
                 latest_gpu_percent,
                 &latest_gpu_data,
+                latest_net_kb,
+                latest_disk_mb,
+                latest_volume,
                 latest_cpu_temp,
                 latest_cpu_power,
                 latest_cpu_mhz,
-                color_mode,
+                now_playing_title.as_deref(),
+                &mut now_playing_marquee,
+                config.rotation,
             );
-        } else if is_idle {
-            draw_idle_clock(&mut fb, color_mode);
-        } else {
-            draw_bars(&mut fb, &bar_heights, color_mode);
         }
-        draw_status_lines(
-            &mut fb,
-            &sys,
-            latest_gpu_percent,
-            &latest_gpu_data,
-            latest_net_kb,
-            latest_disk_mb,
-            latest_volume,
-            latest_cpu_temp,
-            latest_cpu_power,
-            latest_cpu_mhz,
-            now_playing_title.as_deref(),
-            &mut now_playing_marquee,
-        );
 
         // 4) Kirim ke layar.
-        lcd.send_framebuffer(&hs, &fb, 75)?;
+        lcd.send_framebuffer(&fb, 75, config.rotation)?;
 
         // 5) Atur kecepatan biar mendekati `target_fps` saat ini (idle atau
         // aktif — bisa beda tiap iterasi), tanpa memaksa kalau memang lebih
@@ -807,28 +873,50 @@ fn compute_bars(
     bars
 }
 
-fn draw_bars(fb: &mut Framebuffer, heights: &[f32], color_mode: ColorMode) {
+fn draw_bars(fb: &mut Framebuffer, heights: &[f32], color_mode: ColorMode, rotation: Rotation) {
     let width = fb.width();
     let height = fb.height();
 
-    let top_margin = 100u32; // ruang untuk 3 baris status di atas
-    let bottom_margin = 10u32;
-    let area_height = height.saturating_sub(top_margin + bottom_margin);
-    let area_top = top_margin;
+    if is_portrait(rotation) {
+        let top_margin = 80u32;
+        let bottom_margin = 10u32;
+        let area_height = height.saturating_sub(top_margin + bottom_margin);
+        let area_top = top_margin;
 
-    let gap = 3u32;
-    let total_gap = gap * (heights.len() as u32 + 1);
-    let bar_width = (width.saturating_sub(total_gap)) / heights.len() as u32;
+        let gap = 2u32;
+        let total_gap = gap * (heights.len() as u32 + 1);
+        let bar_width = (width.saturating_sub(total_gap)) / heights.len() as u32;
 
-    let mut x = gap;
-    for &h in heights {
-        let bar_h = (area_height as f32 * h).round() as u32;
-        let y = area_top + (area_height - bar_h);
+        let mut x = gap;
+        for &h in heights {
+            let bar_h = (area_height as f32 * h).round() as u32;
+            let y = area_top + (area_height - bar_h);
 
-        let (r, g, b) = level_color(h, color_mode);
-        fb.fill_rect(x, y, bar_width, bar_h, r, g, b);
+            let (r, g, b) = level_color(h, color_mode);
+            fb.fill_rect(x, y, bar_width, bar_h, r, g, b);
 
-        x += bar_width + gap;
+            x += bar_width + gap;
+        }
+    } else {
+        let top_margin = 100u32;
+        let bottom_margin = 10u32;
+        let area_height = height.saturating_sub(top_margin + bottom_margin);
+        let area_top = top_margin;
+
+        let gap = 3u32;
+        let total_gap = gap * (heights.len() as u32 + 1);
+        let bar_width = (width.saturating_sub(total_gap)) / heights.len() as u32;
+
+        let mut x = gap;
+        for &h in heights {
+            let bar_h = (area_height as f32 * h).round() as u32;
+            let y = area_top + (area_height - bar_h);
+
+            let (r, g, b) = level_color(h, color_mode);
+            fb.fill_rect(x, y, bar_width, bar_h, r, g, b);
+
+            x += bar_width + gap;
+        }
     }
 }
 
@@ -891,23 +979,15 @@ fn draw_game_dashboard(
     cpu_power: Option<f32>,
     cpu_mhz: Option<u32>,
     color_mode: ColorMode,
+    rotation: Rotation,
 ) {
     let width = fb.width();
     let height = fb.height();
 
-    // Area sama persis dipakai draw_bars/draw_idle_clock, supaya semua mode
-    // tampilan menempati ruang yang identik (tidak geser baris info di atas).
     let top_margin = 100u32;
     let bottom_margin = 10u32;
     let area_top = top_margin;
     let area_height = height.saturating_sub(top_margin + bottom_margin);
-
-    let side_margin = 20u32;
-    let gap = 16u32;
-    let panel_count = 4u32;
-    let usable_width = width.saturating_sub(side_margin * 2);
-    let panel_width =
-        (usable_width.saturating_sub(gap * (panel_count - 1))) / panel_count;
 
     let border = accent_color(color_mode);
     let panel_bg = (0x14u8, 0x14u8, 0x1Cu8);
@@ -915,8 +995,6 @@ fn draw_game_dashboard(
     let value_color = (0xF0u8, 0xF0u8, 0xF0u8);
     let border_thickness = 2u32;
 
-    // Data tiap panel disiapkan dulu (string), baru digambar dalam satu loop
-    // di bawah supaya layout ke-4 kotak konsisten (tidak duplikasi kode).
     struct Panel {
         label: &'static str,
         value: String,
@@ -924,9 +1002,6 @@ fn draw_game_dashboard(
     }
 
     let fps_value = gpu_data.fps.map_or_else(|| "--".to_string(), |f| f.to_string());
-    // Kalau GPU usage tinggi tapi fps kosong, kemungkinan besar game-nya
-    // borderless windowed (bukan exclusive fullscreen) — lihat catatan di
-    // gpu_amd.rs. Kasih hint ini daripada cuma "--" polos yang bikin bingung.
     let fps_detail = if gpu_data.fps.is_some() {
         "FULLSCREEN".to_string()
     } else {
@@ -944,9 +1019,6 @@ fn draw_game_dashboard(
 
     let cpu_pct = sys.global_cpu_info().cpu_usage();
     let cpu_value = format!("{cpu_pct:.0}%");
-    // Detail CPU: frekuensi real-time (GHz/MHz) + suhu + power — tampilkan
-    // field yang tersedia saja (mis. kalau driver suhu tidak ada, cukup
-    // frekuensi + watt).
     let cpu_detail = {
         let mut parts: Vec<String> = Vec::new();
         if let Some(m) = cpu_mhz {
@@ -970,52 +1042,99 @@ fn draw_game_dashboard(
         Panel { label: "RAM", value: ram_value, detail: ram_detail },
     ];
 
-    // Skala 18 dipilih supaya string 4 karakter terpanjang yang realistis
-    // muncul di sini ("100%") masih muat di lebar 1 kotak (~458px pada
-    // resolusi 1920x462): 4 char * 6 * 18 = 432px, masih ada sisa margin.
-    let value_scale = 18u32;
-    let label_scale = 3u32;
-    let detail_scale = 4u32;
-    let label_height = Framebuffer::text_height(label_scale);
-    let detail_height = Framebuffer::text_height(detail_scale);
-    let value_height = Framebuffer::text_height(value_scale);
-    let padding = 14u32;
+    if is_portrait(rotation) {
+        let side_margin = 10u32;
+        let gap = 8u32;
+        let panel_count = panels.len() as u32;
+        let usable_height = area_height.saturating_sub(gap * (panel_count - 1));
+        let panel_height = usable_height / panel_count;
+        let panel_width = width.saturating_sub(side_margin * 2);
 
-    let mut x = side_margin;
-    for panel in &panels {
-        // Border (kotak luar) lalu isi sedikit lebih kecil di dalamnya —
-        // efek "outline" tanpa perlu fungsi gambar garis terpisah.
-        fb.fill_rect(x, area_top, panel_width, area_height, border.0, border.1, border.2);
-        fb.fill_rect(
-            x + border_thickness,
-            area_top + border_thickness,
-            panel_width.saturating_sub(border_thickness * 2),
-            area_height.saturating_sub(border_thickness * 2),
-            panel_bg.0, panel_bg.1, panel_bg.2,
-        );
+        let value_scale = 10u32;
+        let label_scale = 2u32;
+        let detail_scale = 2u32;
+        let label_height = Framebuffer::text_height(label_scale);
+        let detail_height = Framebuffer::text_height(detail_scale);
+        let value_height = Framebuffer::text_height(value_scale);
+        let padding = 8u32;
 
-        let label_width = Framebuffer::text_width(panel.label, label_scale);
-        let label_x = x + panel_width.saturating_sub(label_width) / 2;
-        let label_y = area_top + padding;
-        fb.draw_text(label_x, label_y, panel.label, label_color.0, label_color.1, label_color.2, label_scale);
+        let mut y = area_top;
+        for panel in &panels {
+            fb.fill_rect(side_margin, y, panel_width, panel_height, border.0, border.1, border.2);
+            fb.fill_rect(
+                side_margin + border_thickness,
+                y + border_thickness,
+                panel_width.saturating_sub(border_thickness * 2),
+                panel_height.saturating_sub(border_thickness * 2),
+                panel_bg.0, panel_bg.1, panel_bg.2,
+            );
 
-        let detail_width = Framebuffer::text_width(&panel.detail, detail_scale);
-        let detail_x = x + panel_width.saturating_sub(detail_width) / 2;
-        let detail_y = area_top + area_height.saturating_sub(detail_height + padding);
-        fb.draw_text(detail_x, detail_y, &panel.detail, label_color.0, label_color.1, label_color.2, detail_scale);
+            let label_width = Framebuffer::text_width(panel.label, label_scale);
+            let label_x = side_margin + (panel_width.saturating_sub(label_width) / 2);
+            let label_y = y + padding;
+            fb.draw_text(label_x, label_y, panel.label, label_color.0, label_color.1, label_color.2, label_scale);
 
-        // Angka besar diposisikan tepat di tengah ruang KOSONG antara label
-        // (atas) dan detail (bawah) — bukan tengah kotak penuh — supaya
-        // tidak terasa "turun" kalau label/detail memakan cukup ruang.
-        let value_width = Framebuffer::text_width(&panel.value, value_scale);
-        let value_x = x + panel_width.saturating_sub(value_width) / 2;
-        let middle_top = label_y + label_height;
-        let middle_bottom = detail_y;
-        let middle_space = middle_bottom.saturating_sub(middle_top);
-        let value_y = middle_top + middle_space.saturating_sub(value_height) / 2;
-        fb.draw_text(value_x, value_y, &panel.value, value_color.0, value_color.1, value_color.2, value_scale);
+            let detail_width = Framebuffer::text_width(&panel.detail, detail_scale);
+            let detail_x = side_margin + (panel_width.saturating_sub(detail_width) / 2);
+            let detail_y = y + panel_height.saturating_sub(detail_height + padding);
+            fb.draw_text(detail_x, detail_y, &panel.detail, label_color.0, label_color.1, label_color.2, detail_scale);
 
-        x += panel_width + gap;
+            let value_width = Framebuffer::text_width(&panel.value, value_scale);
+            let value_x = side_margin + (panel_width.saturating_sub(value_width) / 2);
+            let middle_top = label_y + label_height;
+            let middle_bottom = detail_y;
+            let middle_space = middle_bottom.saturating_sub(middle_top);
+            let value_y = middle_top + middle_space.saturating_sub(value_height) / 2;
+            fb.draw_text(value_x, value_y, &panel.value, value_color.0, value_color.1, value_color.2, value_scale);
+
+            y += panel_height + gap;
+        }
+    } else {
+        let side_margin = 20u32;
+        let gap = 16u32;
+        let panel_count = panels.len() as u32;
+        let usable_width = width.saturating_sub(side_margin * 2);
+        let panel_width = (usable_width.saturating_sub(gap * (panel_count - 1))) / panel_count;
+
+        let value_scale = 18u32;
+        let label_scale = 3u32;
+        let detail_scale = 4u32;
+        let label_height = Framebuffer::text_height(label_scale);
+        let detail_height = Framebuffer::text_height(detail_scale);
+        let value_height = Framebuffer::text_height(value_scale);
+        let padding = 14u32;
+
+        let mut x = side_margin;
+        for panel in &panels {
+            fb.fill_rect(x, area_top, panel_width, area_height, border.0, border.1, border.2);
+            fb.fill_rect(
+                x + border_thickness,
+                area_top + border_thickness,
+                panel_width.saturating_sub(border_thickness * 2),
+                area_height.saturating_sub(border_thickness * 2),
+                panel_bg.0, panel_bg.1, panel_bg.2,
+            );
+
+            let label_width = Framebuffer::text_width(panel.label, label_scale);
+            let label_x = x + panel_width.saturating_sub(label_width) / 2;
+            let label_y = area_top + padding;
+            fb.draw_text(label_x, label_y, panel.label, label_color.0, label_color.1, label_color.2, label_scale);
+
+            let detail_width = Framebuffer::text_width(&panel.detail, detail_scale);
+            let detail_x = x + panel_width.saturating_sub(detail_width) / 2;
+            let detail_y = area_top + area_height.saturating_sub(detail_height + padding);
+            fb.draw_text(detail_x, detail_y, &panel.detail, label_color.0, label_color.1, label_color.2, detail_scale);
+
+            let value_width = Framebuffer::text_width(&panel.value, value_scale);
+            let value_x = x + panel_width.saturating_sub(value_width) / 2;
+            let middle_top = label_y + label_height;
+            let middle_bottom = detail_y;
+            let middle_space = middle_bottom.saturating_sub(middle_top);
+            let value_y = middle_top + middle_space.saturating_sub(value_height) / 2;
+            fb.draw_text(value_x, value_y, &panel.value, value_color.0, value_color.1, value_color.2, value_scale);
+
+            x += panel_width + gap;
+        }
     }
 }
 
@@ -1023,40 +1142,68 @@ fn draw_game_dashboard(
 /// dipanggil sebagai pengganti `draw_bars` saat lagi diam/idle (bar EQ kosong
 /// nggak ada gunanya digambar terus). Baris info kecil (`draw_status_lines`)
 /// tetap digambar terpisah seperti biasa, tidak terpengaruh fungsi ini.
-fn draw_idle_clock(fb: &mut Framebuffer, color_mode: ColorMode) {
+fn draw_idle_clock(fb: &mut Framebuffer, color_mode: ColorMode, rotation: Rotation) {
     let width = fb.width();
     let height = fb.height();
-
-    // Batas area yang sama dipakai `draw_bars`, supaya jam & bar EQ selalu
-    // "menempati ruang" yang identik dan tidak tumpang-tindih baris info.
-    let top_margin = 100u32;
-    let bottom_margin = 10u32;
-    let area_top = top_margin;
-    let area_height = height.saturating_sub(top_margin + bottom_margin);
 
     let (r, g, b) = accent_color(color_mode);
     let now = Local::now();
 
-    let time_scale = 20u32;
-    let time_str = now.format("%H:%M:%S").to_string();
-    let time_width = Framebuffer::text_width(&time_str, time_scale);
-    let time_height = Framebuffer::text_height(time_scale);
+    if is_portrait(rotation) {
+        let top_margin = 80u32;
+        let bottom_margin = 10u32;
+        let area_top = top_margin;
+        let area_height = height.saturating_sub(top_margin + bottom_margin);
 
-    let date_scale = 6u32;
-    let date_str = now.format("%A, %d %B %Y").to_string();
-    let date_width = Framebuffer::text_width(&date_str, date_scale);
-    let date_height = Framebuffer::text_height(date_scale);
+        let time_scale = 10u32;
+        let date_scale = 3u32;
+        let gap = 12u32;
 
-    let gap = 20u32;
-    let block_height = time_height + gap + date_height;
-    let block_top = area_top + area_height.saturating_sub(block_height) / 2;
+        let time_str = now.format("%H:%M:%S").to_string();
+        let time_width = Framebuffer::text_width(&time_str, time_scale);
+        let time_height = Framebuffer::text_height(time_scale);
 
-    let time_x = width.saturating_sub(time_width) / 2;
-    fb.draw_text(time_x, block_top, &time_str, r, g, b, time_scale);
+        let date_str = now.format("%A, %d %B %Y").to_string();
+        let date_width = Framebuffer::text_width(&date_str, date_scale);
+        let date_height = Framebuffer::text_height(date_scale);
 
-    let date_y = block_top + time_height + gap;
-    let date_x = width.saturating_sub(date_width) / 2;
-    fb.draw_text(date_x, date_y, &date_str, r, g, b, date_scale);
+        let block_height = time_height + gap + date_height;
+        let block_top = area_top + area_height.saturating_sub(block_height) / 2;
+
+        let time_x = width.saturating_sub(time_width) / 2;
+        fb.draw_text(time_x, block_top, &time_str, r, g, b, time_scale);
+
+        let date_y = block_top + time_height + gap;
+        let date_x = width.saturating_sub(date_width) / 2;
+        fb.draw_text(date_x, date_y, &date_str, r, g, b, date_scale);
+    } else {
+        let top_margin = 100u32;
+        let bottom_margin = 10u32;
+        let area_top = top_margin;
+        let area_height = height.saturating_sub(top_margin + bottom_margin);
+
+        let time_scale = 20u32;
+        let date_scale = 6u32;
+        let gap = 20u32;
+
+        let time_str = now.format("%H:%M:%S").to_string();
+        let time_width = Framebuffer::text_width(&time_str, time_scale);
+        let time_height = Framebuffer::text_height(time_scale);
+
+        let date_str = now.format("%A, %d %B %Y").to_string();
+        let date_width = Framebuffer::text_width(&date_str, date_scale);
+        let date_height = Framebuffer::text_height(date_scale);
+
+        let block_height = time_height + gap + date_height;
+        let block_top = area_top + area_height.saturating_sub(block_height) / 2;
+
+        let time_x = width.saturating_sub(time_width) / 2;
+        fb.draw_text(time_x, block_top, &time_str, r, g, b, time_scale);
+
+        let date_y = block_top + time_height + gap;
+        let date_x = width.saturating_sub(date_width) / 2;
+        fb.draw_text(date_x, date_y, &date_str, r, g, b, date_scale);
+    }
 }
 
 /// Gambar 3 baris info di atas layar:
@@ -1082,106 +1229,158 @@ fn draw_status_lines(
     cpu_mhz: Option<u32>,
     now_playing: Option<&str>,
     marquee: &mut Marquee,
+    rotation: Rotation,
 ) {
-    let scale = STATUS_TEXT_SCALE;
     let color = (0xE0, 0xE0, 0xE0);
-    let line_height = Framebuffer::text_height(scale) + 6;
 
-    // --- Baris 1: CPU, GPU, uptime, jam, tanggal ---
-    let cpu = sys.global_cpu_info().cpu_usage();
-    let used_mb = sys.used_memory() / 1024 / 1024;
-    let total_mb = sys.total_memory() / 1024 / 1024;
-    let uptime_str = format_uptime(System::uptime());
-    let now = Local::now();
-    let time_str = now.format("%H:%M:%S").to_string();
-    let date_str = now.format("%Y-%m-%d").to_string();
+    if is_portrait(rotation) {
+        let scale = 2u32;
+        let line_height = Framebuffer::text_height(scale) + 4;
+        let margin = 8u32;
 
-    // GPU utilization % dari PDH
-    let gpu_str = match gpu_percent {
-        Some(p) => format!("{p:.0}%"),
-        None => "N/A".to_string(),
-    };
-    // GPU sensor (suhu, power, fan) dari ADL PMLog — hanya tampilkan field
-    // yang didukung. Format: "41C 4W 0rpm" atau subset kalau ada yang None.
-    // Pakai "C" bukan "°C" karena font bitmap hanya ASCII.
-    let gpu_hw_str = {
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(t) = gpu_data.temp_edge_c { parts.push(format!("{t}C")); }
-        if let Some(w) = gpu_data.power_w     { parts.push(format!("{w}W")); }
-        if let Some(r) = gpu_data.fan_rpm     { parts.push(format!("{r}rpm")); }
-        // Cuma muncul saat ada game exclusive-fullscreen yang jalan; kalau
-        // tidak, field ini `None` dan baris info tidak berubah sama sekali
-        // (tidak ada "0fps" atau semacamnya yang membingungkan saat idle).
-        if let Some(f) = gpu_data.fps         { parts.push(format!("{f}fps")); }
-        parts.join(" ")
-    };
-    let gpu_full = if gpu_hw_str.is_empty() {
-        gpu_str
+        let cpu = sys.global_cpu_info().cpu_usage();
+        let used_mb = sys.used_memory() / 1024 / 1024;
+        let total_mb = sys.total_memory() / 1024 / 1024;
+        let uptime_str = format_uptime(System::uptime());
+        let now = Local::now();
+        let time_str = now.format("%H:%M:%S").to_string();
+        let date_str = now.format("%Y-%m-%d").to_string();
+
+        let gpu_str = match gpu_percent {
+            Some(p) => format!("{p:.0}%"),
+            None => "N/A".to_string(),
+        };
+        let gpu_hw_str = {
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(t) = gpu_data.temp_edge_c { parts.push(format!("{t}C")); }
+            if let Some(w) = gpu_data.power_w     { parts.push(format!("{w}W")); }
+            if let Some(r) = gpu_data.fan_rpm     { parts.push(format!("{r}rpm")); }
+            if let Some(f) = gpu_data.fps         { parts.push(format!("{f}fps")); }
+            parts.join(" ")
+        };
+        let gpu_full = if gpu_hw_str.is_empty() { gpu_str } else { format!("{gpu_str} {gpu_hw_str}") };
+
+        let cpu_hw_str = match (cpu_temp, cpu_power) {
+            (Some(t), Some(w)) => format!("{t:.0}C {w:.0}W"),
+            (Some(t), None)    => format!("{t:.0}C"),
+            (None,    Some(w)) => format!("{w:.0}W"),
+            (None,    None)    => "N/A".to_string(),
+        };
+        let cpu_freq_str = match cpu_mhz {
+            Some(m) => format_freq_mhz(m),
+            None => "N/A".to_string(),
+        };
+
+        let (net_down, net_up) = net_kb;
+        let (disk_read, disk_write) = disk_mb;
+        let volume_str = match volume {
+            Some((_, true)) => "MUTE".to_string(),
+            Some((pct, false)) => format!("{pct:.0}%"),
+            None => "N/A".to_string(),
+        };
+        let song_str = now_playing.unwrap_or("-");
+
+        let mut y = margin;
+        fb.draw_text(margin, y, &format!("CPU {cpu:.0}% {cpu_freq_str} {cpu_hw_str}"), color.0, color.1, color.2, scale);
+        y += line_height;
+        fb.draw_text(margin, y, &format!("GPU {gpu_full}"), color.0, color.1, color.2, scale);
+        y += line_height;
+        fb.draw_text(margin, y, &format!("MEM {used_mb}/{total_mb}MB  UP {uptime_str}"), color.0, color.1, color.2, scale);
+        y += line_height;
+        fb.draw_text(margin, y, &format!("NET {net_down:.0}/{net_up:.0}KB/S D {disk_read:.1}/{disk_write:.1}MB/S"), color.0, color.1, color.2, scale);
+        y += line_height;
+        fb.draw_text(margin, y, &format!("VOL {volume_str}  {time_str}  {date_str}"), color.0, color.1, color.2, scale);
+        y += line_height;
+
+        let title_x0 = margin;
+        let title_x1 = fb.width().saturating_sub(margin);
+        let available_width = title_x1.saturating_sub(title_x0);
+        if available_width > 0 {
+            if marquee.tick(song_str, available_width) {
+                let loop_text = format!("{song_str}{MARQUEE_GAP}");
+                let loop_width = Framebuffer::text_width(&loop_text, scale) as i64;
+                let base_x = title_x0 as i64 - marquee.offset_px as i64;
+                fb.draw_text_clipped(base_x, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1);
+                fb.draw_text_clipped(base_x + loop_width, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1);
+            } else {
+                fb.draw_text(title_x0, y, song_str, color.0, color.1, color.2, scale);
+            }
+        }
     } else {
-        format!("{gpu_str} {gpu_hw_str}")
-    };
+        let scale = STATUS_TEXT_SCALE;
+        let line_height = Framebuffer::text_height(scale) + 6;
 
-    // CPU sensor (suhu + power) — lihat cpu_sensor.rs
-    let cpu_hw_str = match (cpu_temp, cpu_power) {
-        (Some(t), Some(w)) => format!("{t:.0}C {w:.0}W"),
-        (Some(t), None)    => format!("{t:.0}C"),
-        (None,    Some(w)) => format!("{w:.0}W"),
-        (None,    None)    => "N/A".to_string(),
-    };
-    let cpu_freq_str = match cpu_mhz {
-        Some(m) => format_freq_mhz(m),
-        None => "N/A".to_string(),
-    };
-    let line1 = format!(
-        "CPU {cpu:.0}% {cpu_freq_str} {cpu_hw_str}  GPU {gpu_full}  UP {uptime_str}  {time_str}  {date_str}"
-    );
+        let cpu = sys.global_cpu_info().cpu_usage();
+        let used_mb = sys.used_memory() / 1024 / 1024;
+        let total_mb = sys.total_memory() / 1024 / 1024;
+        let uptime_str = format_uptime(System::uptime());
+        let now = Local::now();
+        let time_str = now.format("%H:%M:%S").to_string();
+        let date_str = now.format("%Y-%m-%d").to_string();
 
-    // --- Baris 2: RAM + network + disk IO ---
-    let (net_down, net_up) = net_kb;
-    let (disk_read, disk_write) = disk_mb;
-    let line2 = format!(
-        "MEM {used_mb}/{total_mb}MB  NET DN {net_down:.0}KB/S UP {net_up:.0}KB/S  DISK R {disk_read:.1}MB/S W {disk_write:.1}MB/S"
-    );
+        let gpu_str = match gpu_percent {
+            Some(p) => format!("{p:.0}%"),
+            None => "N/A".to_string(),
+        };
+        let gpu_hw_str = {
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(t) = gpu_data.temp_edge_c { parts.push(format!("{t}C")); }
+            if let Some(w) = gpu_data.power_w     { parts.push(format!("{w}W")); }
+            if let Some(r) = gpu_data.fan_rpm     { parts.push(format!("{r}rpm")); }
+            if let Some(f) = gpu_data.fps         { parts.push(format!("{f}fps")); }
+            parts.join(" ")
+        };
+        let gpu_full = if gpu_hw_str.is_empty() { gpu_str } else { format!("{gpu_str} {gpu_hw_str}") };
 
-    // --- Baris 3: volume + now playing (judul di-scroll kalau kepanjangan) ---
-    let volume_str = match volume {
-        Some((_, true)) => "MUTE".to_string(),
-        Some((pct, false)) => format!("{pct:.0}%"),
-        None => "N/A".to_string(),
-    };
-    let song_str = now_playing.unwrap_or("-");
-    let line3_prefix = format!("VOL {volume_str}  NOW PLAYING: ");
-
-    let mut y = 8u32;
-    fb.draw_text(20, y, &line1, color.0, color.1, color.2, scale);
-    y += line_height;
-    fb.draw_text(20, y, &line2, color.0, color.1, color.2, scale);
-    y += line_height;
-
-    let prefix_width = fb.draw_text(20, y, &line3_prefix, color.0, color.1, color.2, scale);
-    let title_x0 = 20 + prefix_width;
-    let title_x1 = fb.width().saturating_sub(20);
-    let available_width = title_x1.saturating_sub(title_x0);
-
-    if available_width == 0 {
-        // Layar kelewat sempit buat nampilin judul sama sekali — lewati saja.
-    } else if marquee.tick(song_str, available_width) {
-        // Judul kepanjangan -> scroll: gambar 2 salinan (teks + jarak)
-        // berdampingan, supaya begitu salinan pertama habis "lewat", salinan
-        // kedua langsung menyambung mulus tanpa lompatan/kedipan.
-        let loop_text = format!("{song_str}{MARQUEE_GAP}");
-        let loop_width = Framebuffer::text_width(&loop_text, scale) as i64;
-        let base_x = title_x0 as i64 - marquee.offset_px as i64;
-        fb.draw_text_clipped(
-            base_x, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1,
+        let cpu_hw_str = match (cpu_temp, cpu_power) {
+            (Some(t), Some(w)) => format!("{t:.0}C {w:.0}W"),
+            (Some(t), None)    => format!("{t:.0}C"),
+            (None,    Some(w)) => format!("{w:.0}W"),
+            (None,    None)    => "N/A".to_string(),
+        };
+        let cpu_freq_str = match cpu_mhz {
+            Some(m) => format_freq_mhz(m),
+            None => "N/A".to_string(),
+        };
+        let line1 = format!(
+            "CPU {cpu:.0}% {cpu_freq_str} {cpu_hw_str}  GPU {gpu_full}  UP {uptime_str}  {time_str}  {date_str}"
         );
-        fb.draw_text_clipped(
-            base_x + loop_width, y, &loop_text, color.0, color.1, color.2, scale, title_x0,
-            title_x1,
+
+        let (net_down, net_up) = net_kb;
+        let (disk_read, disk_write) = disk_mb;
+        let line2 = format!(
+            "MEM {used_mb}/{total_mb}MB  NET DN {net_down:.0}KB/S UP {net_up:.0}KB/S  DISK R {disk_read:.1}MB/S W {disk_write:.1}MB/S"
         );
-    } else {
-        // Muat pas atau lebih kecil dari lebar area -> tampil statis, diam.
-        fb.draw_text(title_x0, y, song_str, color.0, color.1, color.2, scale);
+
+        let volume_str = match volume {
+            Some((_, true)) => "MUTE".to_string(),
+            Some((pct, false)) => format!("{pct:.0}%"),
+            None => "N/A".to_string(),
+        };
+        let song_str = now_playing.unwrap_or("-");
+        let line3_prefix = format!("VOL {volume_str}  NOW PLAYING: ");
+
+        let mut y = 8u32;
+        fb.draw_text(20, y, &line1, color.0, color.1, color.2, scale);
+        y += line_height;
+        fb.draw_text(20, y, &line2, color.0, color.1, color.2, scale);
+        y += line_height;
+
+        let prefix_width = fb.draw_text(20, y, &line3_prefix, color.0, color.1, color.2, scale);
+        let title_x0 = 20 + prefix_width;
+        let title_x1 = fb.width().saturating_sub(20);
+        let available_width = title_x1.saturating_sub(title_x0);
+
+        if available_width == 0 {
+        } else if marquee.tick(song_str, available_width) {
+            let loop_text = format!("{song_str}{MARQUEE_GAP}");
+            let loop_width = Framebuffer::text_width(&loop_text, scale) as i64;
+            let base_x = title_x0 as i64 - marquee.offset_px as i64;
+            fb.draw_text_clipped(base_x, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1);
+            fb.draw_text_clipped(base_x + loop_width, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1);
+        } else {
+            fb.draw_text(title_x0, y, song_str, color.0, color.1, color.2, scale);
+        }
     }
 }
 

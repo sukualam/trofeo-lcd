@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Result};
 use trofeo_lcd::dxgi_capture::{self, CaptureResult, DxgiSession};
 use trofeo_lcd::png_save;
-use trofeo_lcd::{hotkey, Framebuffer, LyLcd, TROFEO_VISION_9_16};
+use trofeo_lcd::{hotkey, Framebuffer, LyLcd, Rotation, TROFEO_VISION_9_16};
 
 const DEFAULT_ACTIVE_FPS: f32 = 30.0;
 const DEFAULT_IDLE_FPS: f32 = 10.0;
@@ -22,7 +22,7 @@ struct Config {
     active_fps: f32,
     idle_fps: f32,
     quality: u8,
-    rotate_180: bool,
+    rotation: Rotation,
     hide_console: bool,
     list_only: bool,
     /// (virtual-key code tombol, label asli dari argumen) — `None` = nonaktif.
@@ -57,7 +57,7 @@ fn parse_args() -> Result<Config> {
     let mut active_fps = DEFAULT_ACTIVE_FPS;
     let mut idle_fps = DEFAULT_IDLE_FPS;
     let mut quality = DEFAULT_JPEG_QUALITY;
-    let mut rotate_180 = false;
+    let mut rotation = Rotation::Deg0;
     let mut hide_console = false;
     let mut list_only = false;
     let mut screenshot_key: Option<(u32, String)> = None;
@@ -96,8 +96,17 @@ fn parse_args() -> Result<Config> {
                     .map_err(|_| anyhow::anyhow!("--quality: '{raw}' bukan angka 1-100 valid"))?
                     .clamp(1, 100);
             }
-            "-r" | "--rotate" => {
-                rotate_180 = true;
+            "--rotate" => {
+                let raw = args.next().ok_or_else(|| anyhow::anyhow!("--rotate butuh nilai derajat (0, 90, 180, 270)"))?;
+                let deg: u32 = raw.parse()
+                    .map_err(|_| anyhow::anyhow!("--rotate: '{raw}' bukan angka valid"))?;
+                rotation = match deg {
+                    0 => Rotation::Deg0,
+                    90 => Rotation::Deg90,
+                    180 => Rotation::Deg180,
+                    270 => Rotation::Deg270,
+                    other => bail!("--rotate: {other} tidak valid (pakai 0, 90, 180, atau 270)"),
+                };
             }
             "--hide-console" => {
                 hide_console = true;
@@ -117,7 +126,7 @@ fn parse_args() -> Result<Config> {
         active_fps,
         idle_fps,
         quality,
-        rotate_180,
+        rotation,
         hide_console,
         list_only,
         screenshot_key,
@@ -189,9 +198,8 @@ fn main() -> Result<()> {
         }
     };
 
-    let mut hs = lcd.handshake()?;
-    hs.rotate_180 = config.rotate_180;
-    println!("LCD Terhubung: {:?}, PM={} SUB={}, Rotate={}", lcd.variant(), hs.pm, hs.sub, hs.rotate_180);
+    let hs = lcd.handshake()?;
+    println!("LCD Terhubung: {:?}, PM={} SUB={}", lcd.variant(), hs.pm, hs.sub);
 
     // Hotkey tangkapan layar (global, default NONAKTIF — aktif hanya kalau
     // argumen --screenshot-key diberikan).
@@ -258,7 +266,7 @@ fn main() -> Result<()> {
         match capture_result {
             Ok(CaptureResult::NewFrame) => {
                 // Layar berubah: kirim frame baru ke LCD
-                if let Err(e) = lcd.send_framebuffer(&hs, &fb, config.quality) {
+                if let Err(e) = lcd.send_framebuffer(&fb, config.quality, Rotation::Deg0) {
                     eprintln!("Peringatan USB: Gagal mengirim frame ke LCD ({e}), mencoba kembali...");
                     std::thread::sleep(Duration::from_millis(200));
                 }

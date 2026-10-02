@@ -140,6 +140,15 @@ pub struct Resolution {
     pub height: u32,
 }
 
+/// Rotasi layar dalam derajat (0, 90, 180, 270).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rotation {
+    Deg0,
+    Deg90,
+    Deg180,
+    Deg270,
+}
+
 impl Resolution {
     pub const fn new(width: u32, height: u32) -> Self {
         Self { width, height }
@@ -358,13 +367,14 @@ impl LyLcd {
         self.write_frame(&frame)
     }
 
-    /// Rangkaian: encode `Framebuffer` ke JPEG (menghormati `handshake.rotate_180`)
-    /// lalu kirim.
-    pub fn send_framebuffer(&self, handshake: &Handshake, fb: &Framebuffer, quality: u8) -> Result<()> {
-        let jpeg = if handshake.rotate_180 {
-            fb.rotated_180().to_jpeg(quality)?
-        } else {
-            fb.to_jpeg(quality)?
+    /// Rangkaian: encode `Framebuffer` ke JPEG lalu kirim.
+    /// Framebuffer selalu landscape (1920x462). Rotasi 90/270 sudah diterapkan
+    /// saat menggambar (framebuffer portrait sementara dirotasi ke landscape).
+    /// Hanya rotasi 180 yang applied di sini.
+    pub fn send_framebuffer(&self, fb: &Framebuffer, quality: u8, rotation: Rotation) -> Result<()> {
+        let jpeg = match rotation {
+            Rotation::Deg180 => fb.rotated_180().to_jpeg(quality)?,
+            _ => fb.to_jpeg(quality)?,
         };
         self.send_frame(&jpeg)
     }
@@ -601,6 +611,32 @@ impl Framebuffer {
             for x in 0..self.width {
                 let src = (((self.height - 1 - y) * self.width + (self.width - 1 - x)) * 3) as usize;
                 let dst = ((y * self.width + x) * 3) as usize;
+                out.pixels[dst..dst + 3].copy_from_slice(&self.pixels[src..src + 3]);
+            }
+        }
+        out
+    }
+
+    /// Salinan yang diputar 90° searah jarum jam.
+    pub fn rotated_90(&self) -> Framebuffer {
+        let mut out = Framebuffer::new(Resolution::new(self.height, self.width));
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let src = ((y * self.width + x) * 3) as usize;
+                let dst = ((x * out.width + (out.width - 1 - y)) * 3) as usize;
+                out.pixels[dst..dst + 3].copy_from_slice(&self.pixels[src..src + 3]);
+            }
+        }
+        out
+    }
+
+    /// Salinan yang diputar 270° searah jarum jam (atau 90° berlawanan arah).
+    pub fn rotated_270(&self) -> Framebuffer {
+        let mut out = Framebuffer::new(Resolution::new(self.height, self.width));
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let src = ((y * self.width + x) * 3) as usize;
+                let dst = (((out.height - 1 - x) * out.width + y) * 3) as usize;
                 out.pixels[dst..dst + 3].copy_from_slice(&self.pixels[src..src + 3]);
             }
         }
