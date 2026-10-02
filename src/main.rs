@@ -17,6 +17,7 @@
 
 #[cfg(target_os = "macos")]
 mod smc_macos;
+mod background;
 mod audio;
 #[cfg(target_os = "macos")]
 mod amd_gpu_macos;
@@ -56,6 +57,9 @@ const FREQ_MAX: f32 = 16_000.0;
 
 /// Skala teks status (dipakai baris CPU/GPU/NET/DISK/VOL & now-playing).
 const STATUS_TEXT_SCALE: u32 = 3;
+/// Seberapa besar background diredupkan saat dimuat (persen). Diproses SEKALI
+/// di awal, jadi zeroes biaya per frame. 0 = tidak diredupkan.
+const DEFAULT_BACKGROUND_DIM: u8 = 45;
 /// Kecepatan scroll teks "now playing" yang kepanjangan, dalam piksel/detik.
 const MARQUEE_SPEED_PX_S: f32 = 45.0;
 /// Jarak kosong antar pengulangan teks saat scroll (biar keliatan seperti
@@ -84,14 +88,18 @@ impl Marquee {
     /// sekarang (mis. judul lagu terbaru) dan lebar area yang tersedia untuk
     /// menampilkannya (piksel). Kembalikan `true` kalau perlu di-scroll
     /// (teks lebih lebar dari area), `false` kalau cukup digambar statis.
-    fn tick(&mut self, current_text: &str, available_width: u32) -> bool {
+    ///
+    /// `scale` ikut diteruskan karena yang ini juga dipakai untuk tanggal di
+    /// portrait, yang skalanya berbeda dari baris status — lebar teks harus
+    /// dihitung pada skala yang benar-benar dipakai untuk menggambarnya.
+    fn tick(&mut self, current_text: &str, available_width: u32, scale: u32) -> bool {
         if current_text != self.text {
             self.text = current_text.to_string();
             self.offset_px = 0.0;
             self.last_tick = Instant::now();
         }
 
-        let text_width = Framebuffer::text_width(&self.text, STATUS_TEXT_SCALE);
+        let text_width = Framebuffer::text_width(&self.text, scale);
         if text_width <= available_width {
             self.offset_px = 0.0;
             return false;
@@ -102,7 +110,7 @@ impl Marquee {
         self.last_tick = now;
 
         let loop_text = format!("{}{}", self.text, MARQUEE_GAP);
-        let loop_width = Framebuffer::text_width(&loop_text, STATUS_TEXT_SCALE).max(1) as f32;
+        let loop_width = Framebuffer::text_width(&loop_text, scale).max(1) as f32;
         self.offset_px = (self.offset_px + MARQUEE_SPEED_PX_S * dt) % loop_width;
         true
     }
@@ -169,6 +177,11 @@ struct Config {
     /// ketemu).
     openrgb_device: Option<String>,
     openrgb_poll_ms: u64,
+    /// Path gambar background (PNG/BMP). Kalau `None`, layar digambar polos
+    /// seperti biasa. Lihat `src/background.rs`.
+    background: Option<std::path::PathBuf>,
+    /// Berapa persen background diredupkan saat dimuat.
+    background_dim: u8,
     /// Kalau `true`, jendela terminal disembunyikan (`FreeConsole`) begitu
     /// argumen selesai diparse — dipakai untuk jalan dari Task Scheduler/
     /// shortcut tanpa menampilkan jendela. Tidak menulis log ke file manapun.
@@ -232,6 +245,12 @@ fn print_help() {
          \x20\x20-k, --screenshot-key <KEY>  Global hotkey untuk menyimpan tangkapan layar\n\
          \x20\x20                          frame LCD sebagai PNG ke Desktop\n\
          \x20\x20                          (f1-f12 atau printscreen). Default: NONAKTIF.\n\
+         \x20\x20--background <PATH>      Gambar latar (PNG/BMP). Disesuaikan\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20dengan ukuran layar (potong, bukan gepeng).\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Gambar yang terlalu detail ditolak:\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20JPEG-nya tidak muat dalam batas firmware.\n\
+         \x20\x20--background-dim <0-100>  Redupkan background saat dimuat agar teks\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20lebih terbaca (default: 45, nol biaya per frame).\n\
          \x20\x20--rotate <DERAJAT>        Rotasi layar: 0, 90, 180, atau 270\n\
          \x20\x20                          (default: 0 / tidak diputar).\n\
          \x20\x20-h, --help                Tampilkan bantuan ini"
@@ -307,6 +326,8 @@ fn parse_args() -> anyhow::Result<Config> {
     let mut silence_timeout_ms = DEFAULT_SILENCE_TIMEOUT_MS;
     let mut color_mode = ColorMode::Default;
     let mut openrgb_device: Option<String> = None;
+    let mut background_path: Option<String> = None;
+    let mut background_dim: u8 = DEFAULT_BACKGROUND_DIM;
     let mut openrgb_poll_ms = DEFAULT_OPENRGB_POLL_MS;
     let mut hide_console = false;
     let mut deepcool_enabled = true;
@@ -354,6 +375,27 @@ fn parse_args() -> anyhow::Result<Config> {
                 })?;
                 screenshot_key = Some((hotkey::parse_key_name(&raw)?, raw.trim().to_ascii_lowercase()));
             }
+            "--background-dim" => {
+                let raw = args.next().ok_or_else(|| {
+                    anyhow::anyhow!("--background-dim butuh nilai 0-100 setelahnya")
+                })?;
+                let v: u32 = raw.trim().parse().map_err(|_| {
+                    anyhow::anyhow!("--background-dim: '{raw}' bukan angka")
+                })?;
+                if v > 100 {
+                    anyhow::bail!("--background-dim harus 0-100");
+                }
+                background_dim = v as u8;
+            }
+            "--background" => {
+                let raw = args.next().ok_or_else(|| {
+                    anyhow::anyhow!("--background butuh path gambar setelahnya")
+                })?;
+                if raw.trim().is_empty() {
+                    anyhow::bail!("--background tidak boleh kosong");
+                }
+                background_path = Some(raw);
+            }
             "--rotate" => {
                 let raw = args.next().ok_or_else(|| {
                     anyhow::anyhow!("--rotate butuh satu nilai derajat setelahnya (0, 90, 180, 270)")
@@ -391,6 +433,8 @@ fn parse_args() -> anyhow::Result<Config> {
         color_mode,
         openrgb_device,
         openrgb_poll_ms,
+        background: background_path.map(std::path::PathBuf::from),
+        background_dim,
         hide_console,
         deepcool_enabled,
         deepcool_update_ms,
@@ -536,6 +580,37 @@ fn main() -> anyhow::Result<()> {
     let mut latest_gpu_data = gpu_amd::GpuAmdData::default();
 
     let audio_ring = audio::spawn_capture()?;
+
+    // Background dimuat SEKALI di sini: decode + cover-crop + pencarian
+    // quality JPEG_relative mahal (~1 detik), tidak boleh diulang tiap frame.
+    let background = match config.background.as_deref() {
+        None => None,
+        Some(path) => {
+            let portrait_res = Resolution::new(
+                TROFEO_VISION_9_16.height,
+                TROFEO_VISION_9_16.width,
+            );
+            match background::load(path, TROFEO_VISION_9_16, portrait_res, config.background_dim) {
+                Ok(bg) => {
+                    println!(
+                        "Background: {} (quality JPEG {}, muat dalam batas firmware)",
+                        bg.source(),
+                        bg.quality()
+                    );
+                    Some(bg)
+                }
+                Err(e) => {
+                    // Gagal di sini lebih baik daripada gagal tiap frame —
+                    // program tetap jalan dengan layar polos.
+                    eprintln!("PERINGATAN: background tidak dipakai — {e}");
+                    None
+                }
+            }
+        }
+    };
+    // Quality 75 adalah default untuk layar polos; kalau ada background, pakai
+    // quality yang sudah diverifikasi muat oleh `background::load`.
+    let jpeg_quality = background.as_ref().map_or(75, background::Background::quality);
     #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     println!(
         "PERINGATAN: platform ini tidak punya jalur loopback audio, jadi bar EQ \
@@ -557,6 +632,9 @@ fn main() -> anyhow::Result<()> {
     }
     let now_playing = media::spawn_now_playing_watcher()?;
     let mut now_playing_marquee = Marquee::new();
+    // Marquee terpisah untuk tanggal di portrait: state tidak boleh bercampur
+    // dengan judul lagu yang juga sedang scroll.
+    let mut date_marquee = Marquee::new();
 
     let mut latest_gpu_percent: Option<f32> = None;
     let mut latest_net_kb = (0.0f64, 0.0f64); // (down, up)
@@ -698,19 +776,20 @@ fn main() -> anyhow::Result<()> {
             None => config.color_mode,
         };
 
-        fb.clear(0x08, 0x08, 0x10);
+        apply_background(&mut fb, background.as_ref(), false);
 
         if is_portrait(config.rotation) {
             let mut portrait_fb = Framebuffer::new(Resolution::new(
                 TROFEO_VISION_9_16.height,
                 TROFEO_VISION_9_16.width,
             ));
-            portrait_fb.clear(0x08, 0x08, 0x10);
+            apply_background(&mut portrait_fb, background.as_ref(), true);
 
             if gaming_mode {
                 draw_game_dashboard(
                     &mut portrait_fb,
                     &sys,
+                    background.as_ref(),
                     latest_gpu_percent,
                     &latest_gpu_data,
                     latest_cpu_temp,
@@ -720,13 +799,14 @@ fn main() -> anyhow::Result<()> {
                     config.rotation,
                 );
             } else if is_idle {
-                draw_idle_clock(&mut portrait_fb, color_mode, config.rotation);
+                draw_idle_clock(&mut portrait_fb, color_mode, config.rotation, &mut date_marquee, background.as_ref());
             } else {
-                draw_bars(&mut portrait_fb, &bar_heights, color_mode, config.rotation);
+                draw_bars(&mut portrait_fb, &bar_heights, color_mode, config.rotation, background.as_ref());
             }
             draw_status_lines(
                 &mut portrait_fb,
                 &sys,
+                background.as_ref(),
                 latest_gpu_percent,
                 &latest_gpu_data,
                 latest_net_kb,
@@ -751,6 +831,7 @@ fn main() -> anyhow::Result<()> {
                 draw_game_dashboard(
                     &mut fb,
                     &sys,
+                    background.as_ref(),
                     latest_gpu_percent,
                     &latest_gpu_data,
                     latest_cpu_temp,
@@ -760,13 +841,14 @@ fn main() -> anyhow::Result<()> {
                     config.rotation,
                 );
             } else if is_idle {
-                draw_idle_clock(&mut fb, color_mode, config.rotation);
+                draw_idle_clock(&mut fb, color_mode, config.rotation, &mut date_marquee, background.as_ref());
             } else {
-                draw_bars(&mut fb, &bar_heights, color_mode, config.rotation);
+                draw_bars(&mut fb, &bar_heights, color_mode, config.rotation, background.as_ref());
             }
             draw_status_lines(
                 &mut fb,
                 &sys,
+                background.as_ref(),
                 latest_gpu_percent,
                 &latest_gpu_data,
                 latest_net_kb,
@@ -782,7 +864,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         // 4) Kirim ke layar.
-        lcd.send_framebuffer(&fb, 75, config.rotation)?;
+        lcd.send_framebuffer(&fb, jpeg_quality, config.rotation)?;
 
         // 5) Atur kecepatan biar mendekati `target_fps` saat ini (idle atau
         // aktif — bisa beda tiap iterasi), tanpa memaksa kalau memang lebih
@@ -873,7 +955,13 @@ fn compute_bars(
     bars
 }
 
-fn draw_bars(fb: &mut Framebuffer, heights: &[f32], color_mode: ColorMode, rotation: Rotation) {
+fn draw_bars(
+    fb: &mut Framebuffer,
+    heights: &[f32],
+    color_mode: ColorMode,
+    rotation: Rotation,
+    bg: Option<&background::Background>,
+) {
     let width = fb.width();
     let height = fb.height();
 
@@ -973,6 +1061,7 @@ fn accent_color(color_mode: ColorMode) -> (u8, u8, u8) {
 fn draw_game_dashboard(
     fb: &mut Framebuffer,
     sys: &System,
+    bg: Option<&background::Background>,
     gpu_percent: Option<f32>,
     gpu_data: &gpu_amd::GpuAmdData,
     cpu_temp: Option<f32>,
@@ -990,6 +1079,11 @@ fn draw_game_dashboard(
     let area_height = height.saturating_sub(top_margin + bottom_margin);
 
     let border = accent_color(color_mode);
+    // Sengaja TIDAK memakai auto-kontras (`readable`) di dalam panel: `panel_bg`
+    // di bawah ini opaque dan gelap, jadi teks terang selalu terbaca. Kalau
+    // auto-kontras dipasang di sini, ia akan mengukur luminansi *gambar
+    // background* — bukan panel — lalu bisa memilih teks hitam di atas panel
+    // gelap, persis kebalikan dari yang diinginkan.
     let panel_bg = (0x14u8, 0x14u8, 0x1Cu8);
     let label_color = (0xA0u8, 0xA0u8, 0xA8u8);
     let value_color = (0xF0u8, 0xF0u8, 0xF0u8);
@@ -1142,7 +1236,59 @@ fn draw_game_dashboard(
 /// dipanggil sebagai pengganti `draw_bars` saat lagi diam/idle (bar EQ kosong
 /// nggak ada gunanya digambar terus). Baris info kecil (`draw_status_lines`)
 /// tetap digambar terpisah seperti biasa, tidak terpengaruh fungsi ini.
-fn draw_idle_clock(fb: &mut Framebuffer, color_mode: ColorMode, rotation: Rotation) {
+/// Skala teks terbesar di mana `text` masih muat dalam `max_width`, dibatasi
+/// oleh `max_scale`.
+///
+/// Dipakai di mode portrait, yang lebannya hanya 462 px. `text_width` grows
+/// linear dengan skala (`karakter * (GLYPH_WIDTH + 1) * scale`), jadi skalanya
+/// bisa dihitung balik tanpa perlu tahu konstanta font-nya: advance per
+/// karakter diambil dari pemanggilan `text_width` pada skala 1.
+/// Isi framebuffer dengan background, atau layar polos kalau tidak ada.
+///
+/// Dipakai untuk framebuffer "dasar" (landscape maupun portrait) SEBELUM
+/// digambar isinya dan sebelum rotasi — jadi background ikut terputar bersama
+/// teks, persis seperti konten lainnya.
+fn apply_background(fb: &mut Framebuffer, background: Option<&background::Background>, portrait: bool) {
+    match background {
+        Some(bg) => fb.as_bytes_mut().copy_from_slice(bg.pixels_for(portrait)),
+        None => fb.clear(0x08, 0x08, 0x10),
+    }
+}
+
+/// Warna teks yang aman dibaca di atas background.
+///
+/// Tanpa background, warna accent dipakai apa adanya. Dengan background, kontras
+/// accent diuji terhadap luminansi area teks; kalau tidak cukup (mis. teks putih
+/// di atas foto terang), diganti hitam atau putih mana yang lebih kontras.
+fn readable(
+    bg: Option<&background::Background>,
+    accent: (u8, u8, u8),
+    rotation: Rotation,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+) -> (u8, u8, u8) {
+    match bg {
+        Some(b) => b.text_color_for(accent, x, y, w, h, is_portrait(rotation)),
+        None => accent,
+    }
+}
+
+fn fit_text_scale(text: &str, max_width: u32, max_scale: u32) -> u32 {
+    let chars = text.chars().count().max(1) as u32;
+    let advance = Framebuffer::text_width("x", 1).max(1);
+    let fit_by_width = max_width / (chars * advance);
+    max_scale.min(fit_by_width).max(1)
+}
+
+fn draw_idle_clock(
+    fb: &mut Framebuffer,
+    color_mode: ColorMode,
+    rotation: Rotation,
+    date_marquee: &mut Marquee,
+    bg: Option<&background::Background>,
+) {
     let width = fb.width();
     let height = fb.height();
 
@@ -1155,15 +1301,22 @@ fn draw_idle_clock(fb: &mut Framebuffer, color_mode: ColorMode, rotation: Rotati
         let area_top = top_margin;
         let area_height = height.saturating_sub(top_margin + bottom_margin);
 
-        let time_scale = 10u32;
-        let date_scale = 3u32;
         let gap = 12u32;
 
         let time_str = now.format("%H:%M:%S").to_string();
+        let date_str = now.format("%A, %d %B %Y").to_string();
+
+        // Di portrait lebarnya hanya 462 px, dan skala tetap yang lama membuat
+        // jam (480 px) meluap ke tepi. Skala dihitung dari teks yang benar-benar
+        // ada supaya locale dengan nama hari/bulan lebih panjang tidak meluap
+        // lagi di kemudian hari — di sini cuma perlu dikecilkan dari 10 ke 9.
+        let avail = width.saturating_sub(16);
+        let time_scale = fit_text_scale(&time_str, avail, 10);
+        let date_scale = fit_text_scale(&date_str, avail, 3);
+
         let time_width = Framebuffer::text_width(&time_str, time_scale);
         let time_height = Framebuffer::text_height(time_scale);
 
-        let date_str = now.format("%A, %d %B %Y").to_string();
         let date_width = Framebuffer::text_width(&date_str, date_scale);
         let date_height = Framebuffer::text_height(date_scale);
 
@@ -1171,11 +1324,36 @@ fn draw_idle_clock(fb: &mut Framebuffer, color_mode: ColorMode, rotation: Rotati
         let block_top = area_top + area_height.saturating_sub(block_height) / 2;
 
         let time_x = width.saturating_sub(time_width) / 2;
-        fb.draw_text(time_x, block_top, &time_str, r, g, b, time_scale);
+        let (tr, tg, tb) = readable(bg, (r, g, b), rotation, time_x, block_top, time_width, time_height);
+        fb.draw_text(time_x, block_top, &time_str, tr, tg, tb, time_scale);
 
         let date_y = block_top + time_height + gap;
-        let date_x = width.saturating_sub(date_width) / 2;
-        fb.draw_text(date_x, date_y, &date_str, r, g, b, date_scale);
+        // Kalau tanggal muat, gambar diam di tengah. Kalau tidak (locale dengan
+        // nama hari/bulan panjang), scroll seperti judul lagu — skalanya
+        // ditahan di cap `3` supaya teksnya tetap terbaca, bukan diperkecil
+        // sampai tak berguna.
+        let clip_left = 8u32;
+        let clip_right = width.saturating_sub(8);
+        let date_area = clip_right.saturating_sub(clip_left);
+        if date_area > 0 {
+            if date_marquee.tick(&date_str, date_area, date_scale) {
+                let loop_text = format!("{date_str}{MARQUEE_GAP}");
+                let loop_width = Framebuffer::text_width(&loop_text, date_scale) as i64;
+                let base_x = clip_left as i64 - date_marquee.offset_px as i64;
+                let (dr, dg, db) = readable(bg, (r, g, b), rotation, clip_left, date_y, date_area, date_height);
+                fb.draw_text_clipped(
+                    base_x, date_y, &loop_text, dr, dg, db, date_scale, clip_left, clip_right,
+                );
+                fb.draw_text_clipped(
+                    base_x + loop_width, date_y, &loop_text, dr, dg, db, date_scale, clip_left,
+                    clip_right,
+                );
+            } else {
+                let date_x = clip_left + date_area.saturating_sub(date_width) / 2;
+                let (dr, dg, db) = readable(bg, (r, g, b), rotation, date_x, date_y, date_width, date_height);
+                fb.draw_text(date_x, date_y, &date_str, dr, dg, db, date_scale);
+            }
+        }
     } else {
         let top_margin = 100u32;
         let bottom_margin = 10u32;
@@ -1198,11 +1376,36 @@ fn draw_idle_clock(fb: &mut Framebuffer, color_mode: ColorMode, rotation: Rotati
         let block_top = area_top + area_height.saturating_sub(block_height) / 2;
 
         let time_x = width.saturating_sub(time_width) / 2;
-        fb.draw_text(time_x, block_top, &time_str, r, g, b, time_scale);
+        let (tr, tg, tb) = readable(bg, (r, g, b), rotation, time_x, block_top, time_width, time_height);
+        fb.draw_text(time_x, block_top, &time_str, tr, tg, tb, time_scale);
 
         let date_y = block_top + time_height + gap;
-        let date_x = width.saturating_sub(date_width) / 2;
-        fb.draw_text(date_x, date_y, &date_str, r, g, b, date_scale);
+        // Kalau tanggal muat, gambar diam di tengah. Kalau tidak (locale dengan
+        // nama hari/bulan panjang), scroll seperti judul lagu — skalanya
+        // ditahan di cap `3` supaya teksnya tetap terbaca, bukan diperkecil
+        // sampai tak berguna.
+        let clip_left = 8u32;
+        let clip_right = width.saturating_sub(8);
+        let date_area = clip_right.saturating_sub(clip_left);
+        if date_area > 0 {
+            if date_marquee.tick(&date_str, date_area, date_scale) {
+                let loop_text = format!("{date_str}{MARQUEE_GAP}");
+                let loop_width = Framebuffer::text_width(&loop_text, date_scale) as i64;
+                let base_x = clip_left as i64 - date_marquee.offset_px as i64;
+                let (dr, dg, db) = readable(bg, (r, g, b), rotation, clip_left, date_y, date_area, date_height);
+                fb.draw_text_clipped(
+                    base_x, date_y, &loop_text, dr, dg, db, date_scale, clip_left, clip_right,
+                );
+                fb.draw_text_clipped(
+                    base_x + loop_width, date_y, &loop_text, dr, dg, db, date_scale, clip_left,
+                    clip_right,
+                );
+            } else {
+                let date_x = clip_left + date_area.saturating_sub(date_width) / 2;
+                let (dr, dg, db) = readable(bg, (r, g, b), rotation, date_x, date_y, date_width, date_height);
+                fb.draw_text(date_x, date_y, &date_str, dr, dg, db, date_scale);
+            }
+        }
     }
 }
 
@@ -1219,6 +1422,7 @@ fn draw_idle_clock(fb: &mut Framebuffer, color_mode: ColorMode, rotation: Rotati
 fn draw_status_lines(
     fb: &mut Framebuffer,
     sys: &System,
+    bg: Option<&background::Background>,
     gpu_percent: Option<f32>,
     gpu_data: &gpu_amd::GpuAmdData,
     net_kb: (f64, f64),
@@ -1280,30 +1484,38 @@ fn draw_status_lines(
         };
         let song_str = now_playing.unwrap_or("-");
 
+        // Warna per baris: kontras diuji terhadap background di area baris itu,
+        // jadi teks putih otomatis jadi hitam di atas foto terang.
+        let line_w = fb.width().saturating_sub(margin * 2);
         let mut y = margin;
-        fb.draw_text(margin, y, &format!("CPU {cpu:.0}% {cpu_freq_str} {cpu_hw_str}"), color.0, color.1, color.2, scale);
+        let line = |fb: &mut Framebuffer, s: &str, bg: Option<&background::Background>, rot: Rotation, y: u32, w: u32, scale: u32, base: (u8,u8,u8)| {
+            let (r, g, b) = readable(bg, base, rot, margin, y, w, Framebuffer::text_height(scale));
+            fb.draw_text(margin, y, s, r, g, b, scale);
+        };
+        line(fb, &format!("CPU {cpu:.0}% {cpu_freq_str} {cpu_hw_str}"), bg, rotation, y, line_w, scale, color);
         y += line_height;
-        fb.draw_text(margin, y, &format!("GPU {gpu_full}"), color.0, color.1, color.2, scale);
+        line(fb, &format!("GPU {gpu_full}"), bg, rotation, y, line_w, scale, color);
         y += line_height;
-        fb.draw_text(margin, y, &format!("MEM {used_mb}/{total_mb}MB  UP {uptime_str}"), color.0, color.1, color.2, scale);
+        line(fb, &format!("MEM {used_mb}/{total_mb}MB  UP {uptime_str}"), bg, rotation, y, line_w, scale, color);
         y += line_height;
-        fb.draw_text(margin, y, &format!("NET {net_down:.0}/{net_up:.0}KB/S D {disk_read:.1}/{disk_write:.1}MB/S"), color.0, color.1, color.2, scale);
+        line(fb, &format!("NET {net_down:.0}/{net_up:.0}KB/S D {disk_read:.1}/{disk_write:.1}MB/S"), bg, rotation, y, line_w, scale, color);
         y += line_height;
-        fb.draw_text(margin, y, &format!("VOL {volume_str}  {time_str}  {date_str}"), color.0, color.1, color.2, scale);
+        line(fb, &format!("VOL {volume_str}  {time_str}  {date_str}"), bg, rotation, y, line_w, scale, color);
         y += line_height;
 
         let title_x0 = margin;
         let title_x1 = fb.width().saturating_sub(margin);
         let available_width = title_x1.saturating_sub(title_x0);
+        let (npx, npy, npz) = readable(bg, color, rotation, title_x0, y, available_width, Framebuffer::text_height(scale));
         if available_width > 0 {
-            if marquee.tick(song_str, available_width) {
+            if marquee.tick(song_str, available_width, scale) {
                 let loop_text = format!("{song_str}{MARQUEE_GAP}");
                 let loop_width = Framebuffer::text_width(&loop_text, scale) as i64;
                 let base_x = title_x0 as i64 - marquee.offset_px as i64;
-                fb.draw_text_clipped(base_x, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1);
-                fb.draw_text_clipped(base_x + loop_width, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1);
+                fb.draw_text_clipped(base_x, y, &loop_text, npx, npy, npz, scale, title_x0, title_x1);
+                fb.draw_text_clipped(base_x + loop_width, y, &loop_text, npx, npy, npz, scale, title_x0, title_x1);
             } else {
-                fb.draw_text(title_x0, y, song_str, color.0, color.1, color.2, scale);
+                fb.draw_text(title_x0, y, song_str, npx, npy, npz, scale);
             }
         }
     } else {
@@ -1359,27 +1571,34 @@ fn draw_status_lines(
         };
         let song_str = now_playing.unwrap_or("-");
         let line3_prefix = format!("VOL {volume_str}  NOW PLAYING: ");
-
+        let status_w = fb.width().saturating_sub(40);
         let mut y = 8u32;
-        fb.draw_text(20, y, &line1, color.0, color.1, color.2, scale);
+        let (r1, g1, b1) = readable(bg, color, rotation, 20, y, status_w, Framebuffer::text_height(scale));
+        fb.draw_text(20, y, &line1, r1, g1, b1, scale);
         y += line_height;
-        fb.draw_text(20, y, &line2, color.0, color.1, color.2, scale);
+        let (r2, g2, b2) = readable(bg, color, rotation, 20, y, status_w, Framebuffer::text_height(scale));
+        fb.draw_text(20, y, &line2, r2, g2, b2, scale);
         y += line_height;
 
-        let prefix_width = fb.draw_text(20, y, &line3_prefix, color.0, color.1, color.2, scale);
+        let (r3, g3, b3) = readable(bg, color, rotation, 20, y, status_w, Framebuffer::text_height(scale));
+        let prefix_width = fb.draw_text(20, y, &line3_prefix, r3, g3, b3, scale);
         let title_x0 = 20 + prefix_width;
         let title_x1 = fb.width().saturating_sub(20);
+        let (npx, npy, npz) = readable(
+            bg, color, rotation, title_x0, y,
+            title_x1.saturating_sub(title_x0), Framebuffer::text_height(scale),
+        );
         let available_width = title_x1.saturating_sub(title_x0);
 
         if available_width == 0 {
-        } else if marquee.tick(song_str, available_width) {
+        } else if marquee.tick(song_str, available_width, scale) {
             let loop_text = format!("{song_str}{MARQUEE_GAP}");
             let loop_width = Framebuffer::text_width(&loop_text, scale) as i64;
             let base_x = title_x0 as i64 - marquee.offset_px as i64;
-            fb.draw_text_clipped(base_x, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1);
-            fb.draw_text_clipped(base_x + loop_width, y, &loop_text, color.0, color.1, color.2, scale, title_x0, title_x1);
+            fb.draw_text_clipped(base_x, y, &loop_text, npx, npy, npz, scale, title_x0, title_x1);
+            fb.draw_text_clipped(base_x + loop_width, y, &loop_text, npx, npy, npz, scale, title_x0, title_x1);
         } else {
-            fb.draw_text(title_x0, y, song_str, color.0, color.1, color.2, scale);
+            fb.draw_text(title_x0, y, song_str, npx, npy, npz, scale);
         }
     }
 }

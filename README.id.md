@@ -33,6 +33,8 @@ menampilkan lagu yang sedang jalan (judul/artis/album dari kontrol media).
   Windows, PulseAudio/PipeWire di Linux, Core Audio process tap di macOS),
   warna hijau→kuning→merah.
 - Info sistem: CPU %, frekuensi CPU real-time, RAM, uptime, jam & tanggal.
+- **Gambar background** opsional (`--background`), dengan warna tulisan
+  dipilih per baris supaya tetap terbaca di atas foto yang terang.
 - Bisa sekaligus menyalakan display **DeepCool** (kirim data CPU via HID).
 - **Mode second monitor** (`trofeo_screen`): LCD jadi monitor sekunder asli.
 - Sinkron warna bar EQ dengan device **OpenRGB**.
@@ -62,6 +64,9 @@ tanpa itu dua field itu tampil `N/A` dan sisanya tetap jalan normal.
 | Opsi | Fungsi | Default |
 |---|---|---|
 | `--idle-fps` / `--active-fps` | FPS saat diam / ada suara | `2` / `15` |
+| `--background <PATH>` | Tampilkan gambar PNG/BMP di belakang tulisan (dipotong sesuai ukuran layar) | nonaktif |
+| `--background-dim <0-100>` | Redupkan gambar itu sekali saat dimuat agar tulisan tetap terbaca — gratis, nol biaya per frame | `45` |
+| `--rotate <DERAJAT>` | Putar layar: 0, 90, 180 atau 270 | `0` |
 | `--no-deepcool` | Matikan integrasi DeepCool | aktif |
 | `--deepcool-update-ms` | Interval kirim data DeepCool (100–2000 ms) | `1000` |
 | `--openrgb-device <NAMA>` | Sinkron warna dengan device OpenRGB | nonaktif |
@@ -88,6 +93,7 @@ Butuh *Virtual Display Driver* (VDD) 1920×462 — lihat
 - `src/cpu_sensor.rs`, `src/cpu_freq.rs` — suhu/power & frekuensi CPU.
 - `src/deepcool/` — driver display DeepCool (HID).
 - `src/dxgi_capture.rs` + `src/bin/screen.rs` — mode second monitor.
+- `src/background.rs` — decode gambar background, redupkan & kontras teks.
 - `src/main.rs` — loop utama: audio → FFT → bar EQ → kirim ke layar.
 - `src/audio_macos.rs`, `src/smc_macos.rs`, `src/amd_pm_macos.rs`,
   `src/amd_gpu_macos.rs` — backend macOS (volume ada di `src/media.rs`,

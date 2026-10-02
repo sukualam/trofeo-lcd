@@ -239,13 +239,13 @@ fn decode(code: u32, bytes: &[u8; 32]) -> Option<f64> {
         }
         // Unsigned integer.
         "ui8" | "ui8 " => Some(bytes.first().copied().unwrap_or(0) as f64),
-        "ui16" | "ui16" => {
+        "ui16 " | "ui16" => {
             if bytes.len() < 2 {
                 return None;
             }
             Some(u16::from_be_bytes([bytes[0], bytes[1]]) as f64)
         }
-        "ui32" | "ui32" => {
+        "ui32 " | "ui32" => {
             if bytes.len() < 4 {
                 return None;
             }

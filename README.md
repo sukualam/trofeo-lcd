@@ -32,6 +32,8 @@ system status (CPU/GPU/RAM/temp) stays readable while playing.
 - EQ bars (48) from currently playing audio (WASAPI loopback on Windows,
   PulseAudio/PipeWire on Linux, Core Audio process tap on macOS), colored
   green→yellow→red.
+- Optional **background image** (`--background`), with the text color picked
+  per line to stay readable on light photos.
 - System info: CPU %, real-time CPU frequency, RAM, uptime, clock & date.
 - Can also drive a **DeepCool** display (sends CPU data over HID).
 - **Second monitor mode** (`trofeo_screen`): the LCD becomes a real second
@@ -63,6 +65,9 @@ those two fields show `N/A` and everything else works.
 | Option | Purpose | Default |
 |---|---|---|
 | `--idle-fps` / `--active-fps` | FPS when idle / has sound | `2` / `15` |
+| `--background <PATH>` | Show a PNG/BMP image behind the text (cropped to fit) | off |
+| `--background-dim <0-100>` | Darken that image once at load so the text stays readable — free, no per-frame cost | `45` |
+| `--rotate <DEG>` | Rotate the screen: 0, 90, 180 or 270 | `0` |
 | `--no-deepcool` | Turn off DeepCool integration | enabled |
 | `--deepcool-update-ms` | DeepCool send interval (100–2000 ms) | `1000` |
 | `--openrgb-device <NAME>` | Sync color with an OpenRGB device | disabled |
@@ -90,6 +95,7 @@ Requires a *Virtual Display Driver* (VDD) at 1920×462 — see
 - `src/deepcool/` — DeepCool display drivers (HID).
 - `src/dxgi_capture.rs` + `src/bin/screen.rs` — second monitor mode.
 - `src/main.rs` — main loop: audio → FFT → EQ bars → send to screen.
+- `src/background.rs` — background image decode, dimming & text contrast.
 - `src/audio_macos.rs`, `src/smc_macos.rs`, `src/amd_pm_macos.rs`,
   `src/amd_gpu_macos.rs` — macOS backends (see `src/media.rs` & `src/netdisk.rs`
   for the volume and network/disk paths).
