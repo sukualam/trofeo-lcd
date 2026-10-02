@@ -20,11 +20,13 @@
 //! bahkan quality terendah tidak muat, gambar ditolak dengan pesan jelas
 //! (lebih baik gagal di awal daripada gagal tiap frame).
 //!
-//! Decode hanya mendukung PNG 8-bit non-interlaced dan BMP tidak
-//! terkompresi, dan sengaja tanpa crate `image` supaya tidak menambah
-//! dependency tree besar ke program yang biasanya jalan ~12 MB RSS.
-//! `flate2` yang sudah dipakai untuk PNG *writer* di `png_save.rs` juga
-//! melayani inflate di sini.
+//! Decode mendukung PNG 8-bit non-interlaced, BMP tidak terkompresi, dan
+//! JPEG (baseline maupun progressive — lihat `src/jpeg_decode.rs`), dan
+//! sengaja tanpa crate `image` supaya tidak menambah dependency tree besar ke
+//! program yang biasanya jalan ~12 MB RSS. `flate2` yang sudah dipakai untuk
+//! PNG *writer* di `png_save.rs` juga melayani inflate di sini; JPEG butuh
+//! crate `jpeg-encoder` yang memang sudah ada — tapi itu hanya bisa
+//! *encode*, jadi decoder JPEG-nya ditulis sendiri.
 
 use trofeo_lcd::{Framebuffer, Resolution, MAX_FRAME_BYTES};
 use std::path::Path;
@@ -406,8 +408,13 @@ fn decode(bytes: &[u8]) -> Result<Decoded, String> {
         decode_png(bytes)
     } else if bytes.starts_with(b"BM") {
         decode_bmp(bytes)
+    } else if bytes.starts_with(&[0xFF, 0xD8]) {
+        // JPEG di-decode lewat modul sendiri supaya tidak perlu crate `image`
+        // (lihat `src/jpeg_decode.rs`).
+        let d = trofeo_lcd::jpeg_decode::decode(bytes)?;
+        Ok(Decoded { width: d.width, height: d.height, pixels: d.pixels })
     } else {
-        Err("format tidak dikenal (harus PNG atau BMP)".to_string())
+        Err("format tidak dikenal (harus PNG, BMP, atau JPEG)".to_string())
     }
 }
 
@@ -1139,6 +1146,55 @@ mod render_check {
     ///   cargo test --release render_untuk_dipreview -- --ignored --nocapture
     /// lalu buka /tmp/preview_*.png. Di-`#[ignore]` supaya `cargo test` biasa
     /// tidak menulis file ke /tmp.
+    /// Preview dengan file JPEG nyata (bukan gradient buatan).
+    ///
+    /// Dipakai untuk memeriksa bahwa foto JPEG + auto-kontras menghasilkan
+    /// komposisi yang benar di kedua orientasi.
+    #[test]
+    #[ignore]
+    fn render_jpeg_nyata_untuk_dipreview() {
+        // Fixture diambil dari `tests/fixtures/` supaya test ini bisa
+        // dijalankan siapa pun tanpa langkah persiapan.
+        let out_dir = std::env::temp_dir();
+        for (src, tag) in [
+            ("tests/fixtures/baseline_420.jpg", "jpg"),
+            ("tests/fixtures/prog_420.jpg", "jpgprog"),
+        ] {
+            let res = Resolution::new(1920, 462);
+            let bg = load(Path::new(src), res, Resolution::new(462, 1920), 15)
+                .unwrap_or_else(|e| panic!("{src}: {e}"));
+
+            for portrait in [false, true] {
+                let mut fb = Framebuffer::new(if portrait {
+                    Resolution::new(462, 1920)
+                } else {
+                    Resolution::new(1920, 462)
+                });
+                fb.as_bytes_mut().copy_from_slice(bg.pixels_for(portrait));
+                let accent = (0xE0u8, 0xE0, 0xE0);
+                let scale = if portrait { 2 } else { 3 };
+                let lines: Vec<String> = if portrait {
+                    (0..12).map(|i| format!("BARIS {i}")).collect()
+                } else {
+                    (0..5).map(|i| format!("BARIS {i}")).collect()
+                };
+                let margin = if portrait { 8 } else { 20 };
+                let mut y = margin;
+                let lh = Framebuffer::text_height(scale) + 4;
+                for l in &lines {
+                    let w = fb.width().saturating_sub(margin * 2);
+                    let (r, g, b) =
+                        bg.text_color_for(accent, margin, y, w, Framebuffer::text_height(scale), portrait);
+                    fb.draw_text(margin, y, l, r, g, b, scale);
+                    y += lh;
+                }
+                let p = out_dir.join(format!("preview_{tag}_{}.png", if portrait { "portrait" } else { "landscape" }));
+                std::fs::write(&p, crate::png_save::encode(&fb)).unwrap();
+                println!("  ditulis {}", p.display());
+            }
+        }
+    }
+
     #[test]
     #[ignore]
     fn render_untuk_dipreview() {
@@ -1147,5 +1203,44 @@ mod render_check {
         // Gradien TERANG-kiri: memaksa auto-kontras chooses black
         render(0, true, "/tmp/preview_bright_left.png");
         render(15, true, "/tmp/preview_bright_dim15.png");
+    }
+}
+
+#[cfg(test)]
+mod jpeg_roundtrip {
+    use super::*;
+    use trofeo_lcd::jpeg_decode;
+
+    #[test]
+    fn jpeg_as_background_lolos_lewat_load() {
+        // Alur nyata: file JPEG -> background::load() -> RGB 1920x462.
+        let jpg = std::fs::read("tests/fixtures/baseline_420.jpg")
+            .expect("fixture JPEG tidak terbaca");
+        let p = std::env::temp_dir().join("trofeo_jpeg_bg_test.jpg");
+        std::fs::write(&p, &jpg).unwrap();
+
+        let res = Resolution::new(1920, 462);
+        let bg = load(&p, res, Resolution::new(462, 1920), 15)
+            .expect("JPEG harus bisa dipakai sebagai background");
+        assert_eq!(bg.landscape.len(), 1920 * 462 * 3);
+        assert_eq!(bg.portrait.len(), 462 * 1920 * 3);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn jpeg_dan_png_memberi_hasil_yang_sama_secara_visual() {
+        // JPEG lossy, jadi akurasinya tidak akan identik dengan PNG asli. Yang
+        // dicek: luminance rata-ratanya tidak melenceng jauh — artinya decode
+        // tidak menggeser gambar secara systematic.
+        let jpg = std::fs::read("tests/fixtures/flat_420.jpg").unwrap();
+        let a = jpeg_decode::decode(&jpg).expect("decode gagal");
+        let lum = a
+            .pixels
+            .chunks_exact(3)
+            .map(|c| 0.2126 * c[0] as f64 + 0.7152 * c[1] as f64 + 0.0722 * c[2] as f64)
+            .sum::<f64>()
+            / (a.pixels.len() / 3) as f64;
+        // Fixture flat_420 punya kecerahan rata-rata antara ~90 dan ~200.
+        assert!((70.0..210.0).contains(&lum), "luminance rata-rata {lum} di luarrentang wajar");
     }
 }

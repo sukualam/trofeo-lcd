@@ -65,7 +65,7 @@ those two fields show `N/A` and everything else works.
 | Option | Purpose | Default |
 |---|---|---|
 | `--idle-fps` / `--active-fps` | FPS when idle / has sound | `2` / `15` |
-| `--background <PATH>` | Show a PNG/BMP image behind the text (cropped to fit) | off |
+| `--background <PATH>` | Show a PNG/BMP/JPEG image behind the text (cropped to fit) | off |
 | `--background-dim <0-100>` | Darken that image once at load so the text stays readable — free, no per-frame cost | `15` |
 | `--rotate <DEG>` | Rotate the screen: 0, 90, 180 or 270 | `0` |
 | `--no-deepcool` | Turn off DeepCool integration | enabled |
@@ -96,6 +96,8 @@ Requires a *Virtual Display Driver* (VDD) at 1920×462 — see
 - `src/dxgi_capture.rs` + `src/bin/screen.rs` — second monitor mode.
 - `src/main.rs` — main loop: audio → FFT → EQ bars → send to screen.
 - `src/background.rs` — background image decode, dimming & text contrast.
+- `src/jpeg_decode.rs` — JPEG decoder (baseline + progressive), written from
+  scratch to avoid pulling in the `image` crate.
 - `src/audio_macos.rs`, `src/smc_macos.rs`, `src/amd_pm_macos.rs`,
   `src/amd_gpu_macos.rs` — macOS backends (see `src/media.rs` & `src/netdisk.rs`
   for the volume and network/disk paths).

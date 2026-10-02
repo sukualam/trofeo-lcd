@@ -46,6 +46,8 @@ use thiserror::Error;
 mod font;
 pub mod dxgi_capture;
 pub mod hotkey;
+/// Decoder JPEG untuk `--background` (baseline + progressive).
+pub mod jpeg_decode;
 pub mod png_save;
 
 pub const VENDOR_ID: u16 = 0x0416;

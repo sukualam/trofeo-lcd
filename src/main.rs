@@ -249,7 +249,7 @@ fn print_help() {
          \x20\x20-k, --screenshot-key <KEY>  Global hotkey untuk menyimpan tangkapan layar\n\
          \x20\x20                          frame LCD sebagai PNG ke Desktop\n\
          \x20\x20                          (f1-f12 atau printscreen). Default: NONAKTIF.\n\
-         \x20\x20--background <PATH>      Gambar latar (PNG/BMP). Disesuaikan\n\
+         \x20\x20--background <PATH>      Gambar latar (PNG/BMP/JPEG). Disesuaikan\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20dengan ukuran layar (potong, bukan gepeng).\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Gambar yang terlalu detail ditolak:\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20JPEG-nya tidak muat dalam batas firmware.\n\

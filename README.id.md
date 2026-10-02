@@ -64,7 +64,7 @@ tanpa itu dua field itu tampil `N/A` dan sisanya tetap jalan normal.
 | Opsi | Fungsi | Default |
 |---|---|---|
 | `--idle-fps` / `--active-fps` | FPS saat diam / ada suara | `2` / `15` |
-| `--background <PATH>` | Tampilkan gambar PNG/BMP di belakang tulisan (dipotong sesuai ukuran layar) | nonaktif |
+| `--background <PATH>` | Tampilkan gambar PNG/BMP/JPEG di belakang tulisan (dipotong sesuai ukuran layar) | nonaktif |
 | `--background-dim <0-100>` | Redupkan gambar itu sekali saat dimuat agar tulisan tetap terbaca — gratis, nol biaya per frame | `15` |
 | `--rotate <DERAJAT>` | Putar layar: 0, 90, 180 atau 270 | `0` |
 | `--no-deepcool` | Matikan integrasi DeepCool | aktif |
@@ -94,6 +94,8 @@ Butuh *Virtual Display Driver* (VDD) 1920×462 — lihat
 - `src/deepcool/` — driver display DeepCool (HID).
 - `src/dxgi_capture.rs` + `src/bin/screen.rs` — mode second monitor.
 - `src/background.rs` — decode gambar background, redupkan & kontras teks.
+- `src/jpeg_decode.rs` — decoder JPEG (baseline + progressive), ditulis dari
+  nol supaya tidak perlu menarik crate `image`.
 - `src/main.rs` — loop utama: audio → FFT → bar EQ → kirim ke layar.
 - `src/audio_macos.rs`, `src/smc_macos.rs`, `src/amd_pm_macos.rs`,
   `src/amd_gpu_macos.rs` — backend macOS (volume ada di `src/media.rs`,
