@@ -65,7 +65,7 @@ tanpa itu dua field itu tampil `N/A` dan sisanya tetap jalan normal.
 |---|---|---|
 | `--idle-fps` / `--active-fps` | FPS saat diam / ada suara | `2` / `15` |
 | `--background <PATH>` | Tampilkan gambar PNG/BMP di belakang tulisan (dipotong sesuai ukuran layar) | nonaktif |
-| `--background-dim <0-100>` | Redupkan gambar itu sekali saat dimuat agar tulisan tetap terbaca — gratis, nol biaya per frame | `45` |
+| `--background-dim <0-100>` | Redupkan gambar itu sekali saat dimuat agar tulisan tetap terbaca — gratis, nol biaya per frame | `15` |
 | `--rotate <DERAJAT>` | Putar layar: 0, 90, 180 atau 270 | `0` |
 | `--no-deepcool` | Matikan integrasi DeepCool | aktif |
 | `--deepcool-update-ms` | Interval kirim data DeepCool (100–2000 ms) | `1000` |

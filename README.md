@@ -66,7 +66,7 @@ those two fields show `N/A` and everything else works.
 |---|---|---|
 | `--idle-fps` / `--active-fps` | FPS when idle / has sound | `2` / `15` |
 | `--background <PATH>` | Show a PNG/BMP image behind the text (cropped to fit) | off |
-| `--background-dim <0-100>` | Darken that image once at load so the text stays readable — free, no per-frame cost | `45` |
+| `--background-dim <0-100>` | Darken that image once at load so the text stays readable — free, no per-frame cost | `15` |
 | `--rotate <DEG>` | Rotate the screen: 0, 90, 180 or 270 | `0` |
 | `--no-deepcool` | Turn off DeepCool integration | enabled |
 | `--deepcool-update-ms` | DeepCool send interval (100–2000 ms) | `1000` |

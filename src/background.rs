@@ -923,7 +923,7 @@ mod tests {
     }
 
     #[test]
-    fn redupkan_membantu_teks_putih_tetap_terbaca() {
+    fn teks_terbaca_pada_setiap_nilai_redupkan() {
         // Simulasikan alur nyata: muat -> redupkan -> pilih warna teks.
         // Yang diverifikasi adalah INVARIANT (warna terpilih selalu punya
         // kontras cukup), bukan warna tertentu — untuk background setelah
@@ -948,21 +948,45 @@ mod tests {
             "warna terpilih harus selalu terbaca, dapat {before:?}"
         );
 
-        // Setelah diredupkan 45% (nilai default), background turun dari 250
-        // ke ~137, jadi teks putih punya alasan untuk dipertahankan.
-        dim_in_place(&mut bg.landscape, 45);
-        bg.dim_percent = 45;
-        let bg_l = bg.avg_luminance(0, 0, 300, 20, false);
-        assert!(
-            bg_l < 140.0,
-            "redupkan 45% harus menurunkan luminance 250 ke bawah 140, dapat {bg_l}"
-        );
+        // Sapu nilai redupkan dari 0..=100. Uji ini sengaja TIDAK menguji
+        // "nilai default": konstanta itu tinggal di `main.rs` (bin), dan versi
+        // lama yang menyebutnya di sini ikut busuk begitu default berubah.
+        // Yang penting dijamin: secukup apa pun nilainya, teks tetap terbaca.
+        //
+        // Catatan: ada satu nilai yang secara matematis TERBURUK. Untuk gambar
+        // putih, redupkan ~52% mengubah luminance 250 ke ~120, yang persis
+        // abu-abu tengah tempat kontras terbaik hanya ~4.2. Jadi "redupkan
+        // lebih banyak" tidak monotonik lebih baik.
+        let floor = worst_case_contrast();
+        for dim in 0..=100u8 {
+            let mut px = Vec::new();
+            for _ in 0..(1920 * 462) {
+                px.extend_from_slice(&[250, 250, 250]);
+            }
+            let mut bg = Background {
+                landscape: px,
+                portrait: vec![0; 462 * 1920 * 3],
+                quality: 75,
+                source: "test".into(),
+                dim_percent: dim,
+            };
+            dim_in_place(&mut bg.landscape, dim);
 
-        let after = bg.text_color_for((0xE0, 0xE0, 0xE0), 0, 0, 300, 20, false);
-        assert!(
-            contrast_ratio(after, bg_l) >= MIN_CONTRAST,
-            "warna terpilih setelah redupkan harus selalu terbaca, dapat {after:?}"
-        );
+            let bg_l = bg.avg_luminance(0, 0, 300, 20, false);
+            let got = bg.text_color_for((0xE0, 0xE0, 0xE0), 0, 0, 300, 20, false);
+            let ratio = contrast_ratio(got, bg_l);
+            // Jaminannya `worst_case_contrast()` (~4.2), bukan MIN_CONTRAST (4.5):
+            // yang latter hanya ambang pemicu, bukan jaminan hasil.
+            assert!(
+                ratio >= floor - 1e-6,
+                "dim {dim}% (luminance {bg_l:.0}): kontras hanya {ratio:.3} dengan {got:?} (batas {floor:.3})"
+            );
+            // Redupkan tidak boleh membuat gambar LEBIH terang.
+            assert!(
+                bg_l <= 250.0,
+                "dim {dim}% menaikkan luminance dari 250 ke {bg_l}"
+            );
+        }
     }
 
     #[test]
@@ -1122,6 +1146,6 @@ mod render_check {
         render(0, false, "/tmp/preview_dark_left.png");
         // Gradien TERANG-kiri: memaksa auto-kontras chooses black
         render(0, true, "/tmp/preview_bright_left.png");
-        render(45, true, "/tmp/preview_bright_dim45.png");
+        render(15, true, "/tmp/preview_bright_dim15.png");
     }
 }

@@ -58,8 +58,12 @@ const FREQ_MAX: f32 = 16_000.0;
 /// Skala teks status (dipakai baris CPU/GPU/NET/DISK/VOL & now-playing).
 const STATUS_TEXT_SCALE: u32 = 3;
 /// Seberapa besar background diredupkan saat dimuat (persen). Diproses SEKALI
-/// di awal, jadi zeroes biaya per frame. 0 = tidak diredupkan.
-const DEFAULT_BACKGROUND_DIM: u8 = 45;
+/// di awal, jadi nol biaya per frame. 0 = tidak diredupkan.
+///
+/// Nilainya sengaja rendah supaya gambar tetap seenak mungkin dilihat;
+/// keterbacaan yang mana pun belum tetap dijamin auto-kontras per baris
+/// (`background::Background::text_color_for`), bukan oleh redupkan ini.
+const DEFAULT_BACKGROUND_DIM: u8 = 15;
 /// Kecepatan scroll teks "now playing" yang kepanjangan, dalam piksel/detik.
 const MARQUEE_SPEED_PX_S: f32 = 45.0;
 /// Jarak kosong antar pengulangan teks saat scroll (biar keliatan seperti
@@ -250,7 +254,7 @@ fn print_help() {
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Gambar yang terlalu detail ditolak:\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20JPEG-nya tidak muat dalam batas firmware.\n\
          \x20\x20--background-dim <0-100>  Redupkan background saat dimuat agar teks\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20lebih terbaca (default: 45, nol biaya per frame).\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20lebih terbaca (default: 15, nol biaya per frame).\n\
          \x20\x20--rotate <DERAJAT>        Rotasi layar: 0, 90, 180, atau 270\n\
          \x20\x20                          (default: 0 / tidak diputar).\n\
          \x20\x20-h, --help                Tampilkan bantuan ini"
