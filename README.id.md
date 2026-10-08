@@ -7,9 +7,21 @@ Visualizer audio + monitor info sistem untuk layar **Thermalright Trofeo
 Vision 9.16 LCD** (USB `0416:5408`, protokol "LY"). Driver ditulis ulang
 byte-per-byte dari [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
 
-Tampilan layar **menyesuaikan otomatis dengan kondisi komputer** — tanpa
-perlu ganti mode manual. Trofeo LCD menampilkan salah satu tampilan di
-bawah bergantung kondisi saat ini:
+**Tampilan default adalah dashboard grid** yang memadatkan semua info dalam
+panel sekaligus — CPU, GPU, RAM, aktivitas jaringan & disk, jam/tanggal/
+volume dan visualizer now-playing. Layar terisi penuh di kedua orientasi:
+
+**Landscape** (`--rotate 0` atau `180`, 1920×462):
+
+![Dashboard grid — landscape](img/new_landscape.png)
+
+**Portrait** (`--rotate 90` atau `270`, 462×1920):
+
+![Dashboard grid — portrait](img/new_portrait.png)
+
+Tambahkan **`--classic`** untuk memakai tampilan adaptif lama — layar
+**menyesuaikan otomatis dengan kondisi komputer**, tanpa perlu ganti mode
+manual:
 
 **Idle** — audio sedang tenang, jadi bar EQ rendah dan baris atas
 menampilkan info sistem: usage & frekuensi real-time CPU, RAM, uptime, jam
@@ -29,6 +41,9 @@ menampilkan lagu yang sedang jalan (judul/artis/album dari kontrol media).
 
 ## Fitur
 
+- **Dashboard grid** (default): panel CPU, GPU, RAM, aktivitas jaringan/
+  disk, jam/tanggal/volume dan now-playing, landscape atau portrait
+  (`--rotate`).
 - Bar EQ (48 bar) dari audio yang sedang diputar (WASAPI loopback di
   Windows, PulseAudio/PipeWire di Linux, Core Audio process tap di macOS),
   warna hijau→kuning→merah.
@@ -67,6 +82,7 @@ tanpa itu dua field itu tampil `N/A` dan sisanya tetap jalan normal.
 | `--background <PATH>` | Tampilkan gambar PNG/BMP/JPEG di belakang tulisan (dipotong sesuai ukuran layar) | nonaktif |
 | `--background-dim <0-100>` | Redupkan gambar itu sekali saat dimuat agar tulisan tetap terbaca — gratis, nol biaya per frame | `15` |
 | `--rotate <DERAJAT>` | Putar layar: 0, 90, 180 atau 270 | `0` |
+| `--classic` | Pakai tampilan adaptif lama (bar EQ / jam idle / dashboard game) sebagai ganti dashboard grid | dashboard grid |
 | `--no-deepcool` | Matikan integrasi DeepCool | aktif |
 | `--deepcool-update-ms` | Interval kirim data DeepCool (100–2000 ms) | `1000` |
 | `--openrgb-device <NAMA>` | Sinkron warna dengan device OpenRGB | nonaktif |

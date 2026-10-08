@@ -203,6 +203,8 @@ struct Config {
     screenshot_key: Option<(u32, String)>,
     /// Rotasi layar (0/90/180/270 derajat).
     rotation: Rotation,
+    /// Tampilan lama (bar EQ / jam idle / dashboard). Default: grid layout baru.
+    classic: bool,
 }
 
 fn print_help() {
@@ -257,6 +259,8 @@ fn print_help() {
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20lebih terbaca (default: 15, nol biaya per frame).\n\
          \x20\x20--rotate <DERAJAT>        Rotasi layar: 0, 90, 180, atau 270\n\
          \x20\x20                          (default: 0 / tidak diputar).\n\
+         \x20\x20--classic                 Pakai tampilan lama (bar EQ / jam idle /\n\
+         \x20\x20                          dashboard). Default: grid layout baru.\n\
          \x20\x20-h, --help                Tampilkan bantuan ini"
     );
 }
@@ -338,6 +342,7 @@ fn parse_args() -> anyhow::Result<Config> {
     let mut deepcool_update_ms = DEFAULT_DEEPCOOL_UPDATE_MS;
     let mut screenshot_key: Option<(u32, String)> = None;
     let mut rotation = Rotation::Deg0;
+    let mut classic = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -409,6 +414,7 @@ fn parse_args() -> anyhow::Result<Config> {
                 })?;
                 rotation = parse_rotation(deg)?;
             }
+            "--classic" => classic = true,
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -444,6 +450,7 @@ fn parse_args() -> anyhow::Result<Config> {
         deepcool_update_ms,
         screenshot_key,
         rotation,
+        classic,
     })
 }
 
@@ -789,40 +796,61 @@ fn main() -> anyhow::Result<()> {
             ));
             apply_background(&mut portrait_fb, background.as_ref(), true);
 
-            if gaming_mode {
-                draw_game_dashboard(
+            if config.classic {
+                if gaming_mode {
+                    draw_game_dashboard(
+                        &mut portrait_fb,
+                        &sys,
+                        background.as_ref(),
+                        latest_gpu_percent,
+                        &latest_gpu_data,
+                        latest_cpu_temp,
+                        latest_cpu_power,
+                        latest_cpu_mhz,
+                        color_mode,
+                        config.rotation,
+                    );
+                } else if is_idle {
+                    draw_idle_clock(&mut portrait_fb, color_mode, config.rotation, &mut date_marquee, background.as_ref());
+                } else {
+                    draw_bars(&mut portrait_fb, &bar_heights, color_mode, config.rotation, background.as_ref());
+                }
+                draw_status_lines(
                     &mut portrait_fb,
                     &sys,
                     background.as_ref(),
                     latest_gpu_percent,
                     &latest_gpu_data,
+                    latest_net_kb,
+                    latest_disk_mb,
+                    latest_volume,
                     latest_cpu_temp,
                     latest_cpu_power,
                     latest_cpu_mhz,
-                    color_mode,
+                    now_playing_title.as_deref(),
+                    &mut now_playing_marquee,
                     config.rotation,
                 );
-            } else if is_idle {
-                draw_idle_clock(&mut portrait_fb, color_mode, config.rotation, &mut date_marquee, background.as_ref());
             } else {
-                draw_bars(&mut portrait_fb, &bar_heights, color_mode, config.rotation, background.as_ref());
+                draw_grid_layout(
+                    &mut portrait_fb,
+                    &sys,
+                    background.as_ref(),
+                    latest_gpu_percent,
+                    &latest_gpu_data,
+                    latest_net_kb,
+                    latest_disk_mb,
+                    latest_volume,
+                    latest_cpu_temp,
+                    latest_cpu_power,
+                    latest_cpu_mhz,
+                    now_playing_title.as_deref(),
+                    &mut now_playing_marquee,
+                    color_mode,
+                    config.rotation,
+                    &bar_heights,
+                );
             }
-            draw_status_lines(
-                &mut portrait_fb,
-                &sys,
-                background.as_ref(),
-                latest_gpu_percent,
-                &latest_gpu_data,
-                latest_net_kb,
-                latest_disk_mb,
-                latest_volume,
-                latest_cpu_temp,
-                latest_cpu_power,
-                latest_cpu_mhz,
-                now_playing_title.as_deref(),
-                &mut now_playing_marquee,
-                config.rotation,
-            );
 
             let rotated = match config.rotation {
                 Rotation::Deg90 => portrait_fb.rotated_270(),
@@ -831,40 +859,61 @@ fn main() -> anyhow::Result<()> {
             };
             fb.as_bytes_mut().copy_from_slice(rotated.as_bytes());
         } else {
-            if gaming_mode {
-                draw_game_dashboard(
+            if config.classic {
+                if gaming_mode {
+                    draw_game_dashboard(
+                        &mut fb,
+                        &sys,
+                        background.as_ref(),
+                        latest_gpu_percent,
+                        &latest_gpu_data,
+                        latest_cpu_temp,
+                        latest_cpu_power,
+                        latest_cpu_mhz,
+                        color_mode,
+                        config.rotation,
+                    );
+                } else if is_idle {
+                    draw_idle_clock(&mut fb, color_mode, config.rotation, &mut date_marquee, background.as_ref());
+                } else {
+                    draw_bars(&mut fb, &bar_heights, color_mode, config.rotation, background.as_ref());
+                }
+                draw_status_lines(
                     &mut fb,
                     &sys,
                     background.as_ref(),
                     latest_gpu_percent,
                     &latest_gpu_data,
+                    latest_net_kb,
+                    latest_disk_mb,
+                    latest_volume,
                     latest_cpu_temp,
                     latest_cpu_power,
                     latest_cpu_mhz,
-                    color_mode,
+                    now_playing_title.as_deref(),
+                    &mut now_playing_marquee,
                     config.rotation,
                 );
-            } else if is_idle {
-                draw_idle_clock(&mut fb, color_mode, config.rotation, &mut date_marquee, background.as_ref());
             } else {
-                draw_bars(&mut fb, &bar_heights, color_mode, config.rotation, background.as_ref());
+                draw_grid_layout(
+                    &mut fb,
+                    &sys,
+                    background.as_ref(),
+                    latest_gpu_percent,
+                    &latest_gpu_data,
+                    latest_net_kb,
+                    latest_disk_mb,
+                    latest_volume,
+                    latest_cpu_temp,
+                    latest_cpu_power,
+                    latest_cpu_mhz,
+                    now_playing_title.as_deref(),
+                    &mut now_playing_marquee,
+                    color_mode,
+                    config.rotation,
+                    &bar_heights,
+                );
             }
-            draw_status_lines(
-                &mut fb,
-                &sys,
-                background.as_ref(),
-                latest_gpu_percent,
-                &latest_gpu_data,
-                latest_net_kb,
-                latest_disk_mb,
-                latest_volume,
-                latest_cpu_temp,
-                latest_cpu_power,
-                latest_cpu_mhz,
-                now_playing_title.as_deref(),
-                &mut now_playing_marquee,
-                config.rotation,
-            );
         }
 
         // 4) Kirim ke layar.
@@ -1008,6 +1057,945 @@ fn draw_bars(
             fb.fill_rect(x, y, bar_width, bar_h, r, g, b);
 
             x += bar_width + gap;
+        }
+    }
+}
+
+/// Layout grid kotak-kotak (default baru). Menampilkan info sistem dalam
+/// kotak-kotak terstruktur, dengan bar EQ mini di bagian bawah.
+fn draw_grid_layout(
+    fb: &mut Framebuffer,
+    sys: &System,
+    bg: Option<&background::Background>,
+    gpu_percent: Option<f32>,
+    gpu_data: &gpu_amd::GpuAmdData,
+    net_kb: (f64, f64),
+    disk_mb: (f64, f64),
+    volume: Option<(f32, bool)>,
+    cpu_temp: Option<f32>,
+    cpu_power: Option<f32>,
+    cpu_mhz: Option<u32>,
+    now_playing: Option<&str>,
+    marquee: &mut Marquee,
+    color_mode: ColorMode,
+    rotation: Rotation,
+    bar_heights: &[f32],
+) {
+    let width = fb.width();
+    let height = fb.height();
+
+    let top_margin = 10u32;
+    let bottom_margin = 10u32;
+    let area_top = top_margin;
+    let area_height = height.saturating_sub(top_margin + bottom_margin);
+
+    let border = accent_color(color_mode);
+    let panel_bg = (0x14u8, 0x14u8, 0x1Cu8);
+    let label_color = (0xA0u8, 0xA0u8, 0xA8u8);
+    let value_color = (0xF0u8, 0xF0u8, 0xF0u8);
+    let border_thickness = 4u32;
+
+    let cpu = sys.global_cpu_info().cpu_usage();
+    let used_mb = sys.used_memory() / 1024 / 1024;
+    let total_mb = sys.total_memory() / 1024 / 1024;
+    let uptime_str = format_uptime(System::uptime());
+    let now = Local::now();
+    let time_str = now.format("%H:%M:%S").to_string();
+    let date_str = now.format("%Y-%m-%d").to_string();
+
+    let gpu_str = match gpu_percent {
+        Some(p) => format!("{p:.0}%"),
+        None => "N/A".to_string(),
+    };
+    let gpu_temp = gpu_data.temp_edge_c.map_or_else(|| "N/A".to_string(), |t| format!("{t}C"));
+    let gpu_watt = gpu_data.power_w.map_or_else(|| "N/A".to_string(), |w| format!("{w}W"));
+    let gpu_rpm = gpu_data.fan_rpm.map_or_else(|| "N/A".to_string(), |r| format!("{r}"));
+    let gpu_fps = gpu_data.fps.map_or_else(|| "N/A".to_string(), |f| format!("{f}"));
+    let gpu_hw_str = format!("{gpu_temp} {gpu_watt} {gpu_rpm} {gpu_fps}");
+    let gpu_full = format!("{gpu_str} {gpu_hw_str}");
+
+    let cpu_freq = match cpu_mhz {
+        Some(m) => format_freq_mhz(m),
+        None => "N/A".to_string(),
+    };
+    let cpu_temp = cpu_temp.map_or_else(|| "N/A".to_string(), |t| format!("{t:.0}C"));
+    let cpu_watt = cpu_power.map_or_else(|| "N/A".to_string(), |w| format!("{w:.0}W"));
+    let cpu_hw_str = format!("{cpu_freq} {cpu_temp} {cpu_watt}");
+
+    let (net_down, net_up) = net_kb;
+    let (disk_read, disk_write) = disk_mb;
+    let volume_str = match volume {
+        Some((_, true)) => "MUTE".to_string(),
+        Some((pct, false)) => format!("{pct:.0}%"),
+        None => "N/A".to_string(),
+    };
+    let song_str = now_playing.unwrap_or("-");
+
+    if is_portrait(rotation) {
+        let margin = 8u32;
+        let gap = 6u32;
+        let cols = 2u32;
+        let rows = 4u32;
+        let usable_width = width.saturating_sub(margin * 2);
+        let usable_height = area_height.saturating_sub(gap * (rows - 1));
+        let panel_width = (usable_width.saturating_sub(gap * (cols - 1))) / cols;
+        let panel_height = usable_height / rows;
+
+        let value_scale = 3u32;
+        let song_scale = 2u32;
+        let label_scale = 3u32;
+        let detail_scale = 3u32;
+        let label_height = Framebuffer::text_height(label_scale);
+        let detail_height = Framebuffer::text_height(detail_scale);
+        let value_height = Framebuffer::text_height(value_scale);
+
+        struct Panel {
+            label: &'static str,
+            value: String,
+            detail: String,
+        }
+
+        let panels = [
+            Panel { label: "CPU", value: format!("{cpu:.0}%"), detail: String::new() },
+            Panel { label: "GPU", value: gpu_str.clone(), detail: gpu_hw_str.clone() },
+            Panel { label: "MEM", value: format!("{used_mb}MB"), detail: format!("{total_mb}MB") },
+            Panel { label: "ACTIVITY", value: String::new(), detail: String::new() },
+            Panel { label: "DATE TIME", value: volume_str.clone(), detail: format!("{time_str}|{date_str}") },
+            Panel { label: "NOW PLAYING", value: song_str.to_string(), detail: String::new() },
+        ];
+
+        let date_row_shrink = 70u32;
+        let mut idx = 0;
+        for row in 0..rows {
+            let row_cols = if row < 2 { cols } else { 1u32 };
+            for col in 0..row_cols {
+                if idx >= panels.len() {
+                    break;
+                }
+                let panel = &panels[idx];
+                let pw = if row_cols == 1 { usable_width } else { panel_width };
+                let x = margin + col * (panel_width + gap);
+                let y = if row == rows - 1 {
+                    (area_top + row * (panel_height + gap)).saturating_sub(date_row_shrink)
+                } else {
+                    area_top + row * (panel_height + gap)
+                };
+                let ph = if row == rows - 1 {
+                    area_top + area_height - y
+                } else if row == 2 {
+                    panel_height.saturating_sub(date_row_shrink)
+                } else {
+                    panel_height
+                };
+
+                fb.fill_rect(x, y, pw, ph, border.0, border.1, border.2);
+                fb.fill_rect(
+                    x + border_thickness,
+                    y + border_thickness,
+                    pw.saturating_sub(border_thickness * 2),
+                    ph.saturating_sub(border_thickness * 2),
+                    panel_bg.0, panel_bg.1, panel_bg.2,
+                );
+
+                let label_width = Framebuffer::text_width(panel.label, label_scale);
+                let label_x = x + (pw.saturating_sub(label_width) / 2);
+                let label_y = y + border_thickness + 4;
+                fb.draw_text(label_x, label_y, panel.label, label_color.0, label_color.1, label_color.2, label_scale);
+
+                let divider_y = label_y + label_height + 4;
+                fb.fill_rect(
+                    x + border_thickness,
+                    divider_y,
+                    pw.saturating_sub(border_thickness * 2),
+                    border_thickness,
+                    border.0, border.1, border.2,
+                );
+
+                let inner_x = x;
+                let inner_w = pw;
+                let inner_y = divider_y;
+                let inner_h = (y + ph).saturating_sub(inner_y);
+
+                if panel.label == "GPU" {
+                    let row_h = (inner_h + border_thickness * 2) / 3;
+
+                    fb.fill_rect(inner_x, inner_y, inner_w, row_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, inner_w.saturating_sub(border_thickness * 2), row_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let usage_label = "Usage";
+                    let usage_scale = fit_text_scale(usage_label, inner_w.saturating_sub(border_thickness * 2), detail_scale);
+                    let ulw = Framebuffer::text_width(usage_label, usage_scale);
+                    let ulx = inner_x + (inner_w.saturating_sub(ulw) / 2);
+                    let uly = inner_y + border_thickness + 4;
+                    fb.draw_text(ulx, uly, usage_label, label_color.0, label_color.1, label_color.2, usage_scale);
+
+                    let usage_val_scale = fit_text_scale(&panel.value, inner_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let uvw = Framebuffer::text_width(&panel.value, usage_val_scale);
+                    let uvx = inner_x + (inner_w.saturating_sub(uvw) / 2);
+                    let usage_value_top = inner_y + border_thickness + 4 + detail_height;
+                    let usage_value_bottom = (inner_y + row_h).saturating_sub(border_thickness + 2);
+                    let uvy = usage_value_top + (usage_value_bottom.saturating_sub(usage_value_top + Framebuffer::text_height(usage_val_scale))) / 2;
+                    fb.draw_text(uvx, uvy, &panel.value, value_color.0, value_color.1, value_color.2, usage_val_scale);
+
+                    let cell_w = (inner_w + border_thickness) / 2;
+                    let gpu_rows: [[(&str, &str); 2]; 2] = [
+                        [("TEMP", gpu_temp.as_str()), ("WATT", gpu_watt.as_str())],
+                        [("RPM", gpu_rpm.as_str()), ("FPS", gpu_fps.as_str())],
+                    ];
+                    for (idx, pair) in gpu_rows.iter().enumerate() {
+                        let sy = inner_y + (idx as u32 + 1) * row_h.saturating_sub(border_thickness);
+                        let rh = if idx == 1 { inner_y + inner_h - sy } else { row_h };
+                        for (cidx, (sub_label, sub_value)) in pair.iter().enumerate() {
+                            let sx = inner_x + cidx as u32 * cell_w.saturating_sub(border_thickness);
+                            let cw = if cidx == 1 { inner_x + inner_w - sx } else { cell_w };
+
+                            fb.fill_rect(sx, sy, cw, rh, border.0, border.1, border.2);
+                            fb.fill_rect(sx + border_thickness, sy + border_thickness, cw.saturating_sub(border_thickness * 2), rh.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                            let sub_lab_scale = fit_text_scale(sub_label, cw.saturating_sub(border_thickness * 2), detail_scale);
+                            let slw = Framebuffer::text_width(sub_label, sub_lab_scale);
+                            let slx = sx + (cw.saturating_sub(slw) / 2);
+                            let sly = sy + border_thickness + 4;
+                            fb.draw_text(slx, sly, sub_label, label_color.0, label_color.1, label_color.2, sub_lab_scale);
+
+                            let sub_val_scale = fit_text_scale(sub_value, cw.saturating_sub(border_thickness * 2 + 4), value_scale);
+                            let svw = Framebuffer::text_width(sub_value, sub_val_scale);
+                            let svx = sx + (cw.saturating_sub(svw) / 2);
+                            let value_top = sy + border_thickness + 4 + detail_height;
+                            let value_bottom = (sy + rh).saturating_sub(border_thickness + 2);
+                            let svy = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(sub_val_scale))) / 2;
+                            fb.draw_text(svx, svy, sub_value, value_color.0, value_color.1, value_color.2, sub_val_scale);
+                        }
+                    }
+                } else if panel.label == "CPU" {
+                    let row_h = (inner_h + border_thickness * 3) / 4;
+
+                    fb.fill_rect(inner_x, inner_y, inner_w, row_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, inner_w.saturating_sub(border_thickness * 2), row_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let usage_label = "Usage";
+                    let usage_scale = fit_text_scale(usage_label, inner_w.saturating_sub(border_thickness * 2), detail_scale);
+                    let ulw = Framebuffer::text_width(usage_label, usage_scale);
+                    let ulx = inner_x + (inner_w.saturating_sub(ulw) / 2);
+                    let uly = inner_y + border_thickness + 4;
+                    fb.draw_text(ulx, uly, usage_label, label_color.0, label_color.1, label_color.2, usage_scale);
+
+                    let usage_val_scale = fit_text_scale(&panel.value, inner_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let uvw = Framebuffer::text_width(&panel.value, usage_val_scale);
+                    let uvx = inner_x + (inner_w.saturating_sub(uvw) / 2);
+                    let usage_value_top = inner_y + border_thickness + 4 + detail_height;
+                    let usage_value_bottom = (inner_y + row_h).saturating_sub(border_thickness + 2);
+                    let uvy = usage_value_top + (usage_value_bottom.saturating_sub(usage_value_top + Framebuffer::text_height(usage_val_scale))) / 2;
+                    fb.draw_text(uvx, uvy, &panel.value, value_color.0, value_color.1, value_color.2, usage_val_scale);
+
+                    let cell_w = (inner_w + border_thickness) / 2;
+                    let pair: [(&str, &str); 2] = [("TEMP", cpu_temp.as_str()), ("WATT", cpu_watt.as_str())];
+                    for (cidx, (sub_label, sub_value)) in pair.iter().enumerate() {
+                        let sx = inner_x + cidx as u32 * cell_w.saturating_sub(border_thickness);
+                        let cw = if cidx == 1 { inner_x + inner_w - sx } else { cell_w };
+                        let sy = inner_y + row_h.saturating_sub(border_thickness);
+                        let rh = row_h;
+
+                        fb.fill_rect(sx, sy, cw, rh, border.0, border.1, border.2);
+                        fb.fill_rect(sx + border_thickness, sy + border_thickness, cw.saturating_sub(border_thickness * 2), rh.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                        let sub_lab_scale = fit_text_scale(sub_label, cw.saturating_sub(border_thickness * 2), detail_scale);
+                        let slw = Framebuffer::text_width(sub_label, sub_lab_scale);
+                        let slx = sx + (cw.saturating_sub(slw) / 2);
+                        let sly = sy + border_thickness + 4;
+                        fb.draw_text(slx, sly, sub_label, label_color.0, label_color.1, label_color.2, sub_lab_scale);
+
+                        let sub_val_scale = fit_text_scale(sub_value, cw.saturating_sub(border_thickness * 2 + 4), value_scale);
+                        let svw = Framebuffer::text_width(sub_value, sub_val_scale);
+                        let svx = sx + (cw.saturating_sub(svw) / 2);
+                        let value_top = sy + border_thickness + 4 + detail_height;
+                        let value_bottom = (sy + rh).saturating_sub(border_thickness + 2);
+                        let svy = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(sub_val_scale))) / 2;
+                        fb.draw_text(svx, svy, sub_value, value_color.0, value_color.1, value_color.2, sub_val_scale);
+                    }
+
+                    let full_cells: [(&str, &str); 2] = [("FREQ", cpu_freq.as_str()), ("UP", uptime_str.as_str())];
+                    for (fidx, (sub_label, sub_value)) in full_cells.iter().enumerate() {
+                        let sy = inner_y + (fidx as u32 + 2) * row_h.saturating_sub(border_thickness);
+                        let rh = if fidx == 1 { inner_y + inner_h - sy } else { row_h };
+
+                        fb.fill_rect(inner_x, sy, inner_w, rh, border.0, border.1, border.2);
+                        fb.fill_rect(inner_x + border_thickness, sy + border_thickness, inner_w.saturating_sub(border_thickness * 2), rh.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                        let sub_lab_scale = fit_text_scale(sub_label, inner_w.saturating_sub(border_thickness * 2), detail_scale);
+                        let slw = Framebuffer::text_width(sub_label, sub_lab_scale);
+                        let slx = inner_x + (inner_w.saturating_sub(slw) / 2);
+                        let sly = sy + border_thickness + 4;
+                        fb.draw_text(slx, sly, sub_label, label_color.0, label_color.1, label_color.2, sub_lab_scale);
+
+                        let sub_val_scale = fit_text_scale(sub_value, inner_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                        let svw = Framebuffer::text_width(sub_value, sub_val_scale);
+                        let svx = inner_x + (inner_w.saturating_sub(svw) / 2);
+                        let value_top = sy + border_thickness + 4 + detail_height;
+                        let value_bottom = (sy + rh).saturating_sub(border_thickness + 2);
+                        let svy = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(sub_val_scale))) / 2;
+                        fb.draw_text(svx, svy, sub_value, value_color.0, value_color.1, value_color.2, sub_val_scale);
+                    }
+                } else if panel.label == "MEM" {
+                    let row_h = (inner_h + border_thickness * 2) / 3;
+
+                    let mem_pct_val = if total_mb > 0 { (used_mb as f32 / total_mb as f32) * 100.0 } else { 0.0 };
+                    let pct_val = format!("{mem_pct_val:.0}%");
+                    let used_val = format!("{used_mb}MB");
+                    let total_val = format!("{total_mb}MB");
+                    let mem_cells: [(&str, &str); 3] = [
+                        ("Usage", pct_val.as_str()),
+                        ("Used", used_val.as_str()),
+                        ("Total", total_val.as_str()),
+                    ];
+                    for (idx, (sub_label, sub_value)) in mem_cells.iter().enumerate() {
+                        let sy = inner_y + (idx as u32) * row_h.saturating_sub(border_thickness);
+                        let rh = if idx == 2 { inner_y + inner_h - sy } else { row_h };
+
+                        fb.fill_rect(inner_x, sy, inner_w, rh, border.0, border.1, border.2);
+                        fb.fill_rect(inner_x + border_thickness, sy + border_thickness, inner_w.saturating_sub(border_thickness * 2), rh.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                        let sub_lab_scale = fit_text_scale(sub_label, inner_w.saturating_sub(border_thickness * 2), detail_scale);
+                        let slw = Framebuffer::text_width(sub_label, sub_lab_scale);
+                        let slx = inner_x + (inner_w.saturating_sub(slw) / 2);
+                        let sly = sy + border_thickness + 4;
+                        fb.draw_text(slx, sly, sub_label, label_color.0, label_color.1, label_color.2, sub_lab_scale);
+
+                        let sub_val_scale = fit_text_scale(sub_value, inner_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                        let svw = Framebuffer::text_width(sub_value, sub_val_scale);
+                        let svx = inner_x + (inner_w.saturating_sub(svw) / 2);
+                        let value_top = sy + border_thickness + 4 + detail_height;
+                        let value_bottom = (sy + rh).saturating_sub(border_thickness + 2);
+                        let svy = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(sub_val_scale))) / 2;
+                        fb.draw_text(svx, svy, sub_value, value_color.0, value_color.1, value_color.2, sub_val_scale);
+                    }
+                } else if panel.label == "ACTIVITY" {
+                    let title_h = border_thickness + detail_height + 8;
+                    let cell_region_h = inner_h.saturating_sub(title_h * 2);
+                    let box_h = (cell_region_h + border_thickness * 2) / 4;
+
+                    let net_title = "NET";
+                    let net_tw = Framebuffer::text_width(net_title, detail_scale);
+                    let net_tx = inner_x + (inner_w.saturating_sub(net_tw) / 2);
+                    let net_ty = inner_y + border_thickness + 4;
+                    fb.draw_text(net_tx, net_ty, net_title, label_color.0, label_color.1, label_color.2, detail_scale);
+
+                    let y_dl = inner_y + title_h;
+                    let y_up = y_dl + box_h.saturating_sub(border_thickness);
+
+                    let disk_title = "DISK";
+                    let disk_tw = Framebuffer::text_width(disk_title, detail_scale);
+                    let disk_tx = inner_x + (inner_w.saturating_sub(disk_tw) / 2);
+                    let disk_ty = y_up + box_h + border_thickness + 4;
+                    fb.draw_text(disk_tx, disk_ty, disk_title, label_color.0, label_color.1, label_color.2, detail_scale);
+
+                    let y_read = y_up + box_h + title_h;
+                    let y_write = y_read + box_h.saturating_sub(border_thickness);
+
+                    let dl_val = format!("{net_down:.0}");
+                    let up_val = format!("{net_up:.0}");
+                    let read_val = format!("{disk_read:.1}");
+                    let write_val = format!("{disk_write:.1}");
+                    let speed_cells: [(&str, &str, &str, u32); 4] = [
+                        ("DL", dl_val.as_str(), "KB/s", y_dl),
+                        ("UP", up_val.as_str(), "KB/s", y_up),
+                        ("READ", read_val.as_str(), "MB/s", y_read),
+                        ("WRITE", write_val.as_str(), "MB/s", y_write),
+                    ];
+                    for (sub_label, sub_value, sub_unit, sy) in speed_cells {
+                        let rh = if sy == y_write { inner_y + inner_h - sy } else { box_h };
+
+                        fb.fill_rect(inner_x, sy, inner_w, rh, border.0, border.1, border.2);
+                        fb.fill_rect(inner_x + border_thickness, sy + border_thickness, inner_w.saturating_sub(border_thickness * 2), rh.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                        let sub_lab_scale = fit_text_scale(sub_label, inner_w.saturating_sub(border_thickness * 2), detail_scale);
+                        let slw = Framebuffer::text_width(sub_label, sub_lab_scale);
+                        let slx = inner_x + (inner_w.saturating_sub(slw) / 2);
+                        let sly = sy + border_thickness + 4;
+                        fb.draw_text(slx, sly, sub_label, label_color.0, label_color.1, label_color.2, sub_lab_scale);
+
+                        let num_scale = fit_text_scale(sub_value, inner_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                        let numw = Framebuffer::text_width(sub_value, num_scale);
+                        let numx = inner_x + (inner_w.saturating_sub(numw) / 2);
+
+                        let unit_scale = fit_text_scale(sub_unit, inner_w.saturating_sub(border_thickness * 2 + 4), value_scale.saturating_sub(1));
+                        let unitw = Framebuffer::text_width(sub_unit, unit_scale);
+                        let unitx = inner_x + (inner_w.saturating_sub(unitw) / 2);
+
+                        let value_top = sy + border_thickness + 4 + detail_height;
+                        let value_bottom = (sy + rh).saturating_sub(border_thickness + 2);
+                        let block_h = Framebuffer::text_height(num_scale) + 2 + Framebuffer::text_height(unit_scale);
+                        let block_y = value_top + (value_bottom.saturating_sub(value_top + block_h)) / 2;
+                        fb.draw_text(numx, block_y, sub_value, value_color.0, value_color.1, value_color.2, num_scale);
+                        fb.draw_text(unitx, block_y + Framebuffer::text_height(num_scale) + 2, sub_unit, label_color.0, label_color.1, label_color.2, unit_scale);
+                    }
+                } else if panel.label == "DATE TIME" {
+                    let vol_w = (inner_w + border_thickness) / 4;
+                    let dt_x = inner_x + vol_w.saturating_sub(border_thickness);
+                    let dt_w = inner_w.saturating_sub(vol_w).saturating_add(border_thickness);
+
+                    fb.fill_rect(inner_x, inner_y, vol_w, inner_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, vol_w.saturating_sub(border_thickness * 2), inner_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let vol_label = "VOL";
+                    let vol_lab_scale = fit_text_scale(vol_label, vol_w.saturating_sub(border_thickness * 2), detail_scale);
+                    let vlw = Framebuffer::text_width(vol_label, vol_lab_scale);
+                    let vlx = inner_x + (vol_w.saturating_sub(vlw) / 2);
+                    let vly = inner_y + border_thickness + 4;
+
+                    let fill_top = vly;
+                    let fill_bottom = (inner_y + inner_h).saturating_sub(border_thickness);
+                    let fill_max_h = fill_bottom.saturating_sub(fill_top);
+                    if let Some((pct, _)) = volume {
+                        let fill_h = (fill_max_h as f32 * (pct / 100.0).clamp(0.0, 1.0)) as u32;
+                        if fill_h > 0 {
+                            let dim_r = (border.0 as u32 * 2 / 5) as u8;
+                            let dim_g = (border.1 as u32 * 2 / 5) as u8;
+                            let dim_b = (border.2 as u32 * 2 / 5) as u8;
+                            fb.fill_rect(inner_x + border_thickness, fill_bottom.saturating_sub(fill_h), vol_w.saturating_sub(border_thickness * 2), fill_h, dim_r, dim_g, dim_b);
+                        }
+                    }
+                    fb.draw_text(vlx, vly, vol_label, label_color.0, label_color.1, label_color.2, vol_lab_scale);
+
+                    let vol_pct = match volume {
+                        Some((pct, _)) => format!("{pct:.0}%"),
+                        None => "N/A".to_string(),
+                    };
+                    let vol_scale = fit_text_scale(&vol_pct, vol_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let vpw = Framebuffer::text_width(&vol_pct, vol_scale);
+                    let vpx = inner_x + (vol_w.saturating_sub(vpw) / 2);
+                    let value_top = inner_y + border_thickness + 4 + detail_height;
+                    let value_bottom = (inner_y + inner_h).saturating_sub(border_thickness + 2);
+                    let vpy = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(vol_scale))) / 2;
+                    fb.draw_text(vpx, vpy, &vol_pct, value_color.0, value_color.1, value_color.2, vol_scale);
+
+                    fb.fill_rect(dt_x, inner_y, dt_w, inner_h, border.0, border.1, border.2);
+                    fb.fill_rect(dt_x + border_thickness, inner_y + border_thickness, dt_w.saturating_sub(border_thickness * 2), inner_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let inner_top = inner_y + border_thickness;
+                    let inner_bottom = (inner_y + inner_h).saturating_sub(border_thickness);
+                    let half_h = inner_bottom.saturating_sub(inner_top) / 2;
+
+                    let time_scale = fit_text_scale(&time_str, dt_w.saturating_sub(border_thickness * 2 + 4), 5);
+                    let tw = Framebuffer::text_width(&time_str, time_scale);
+                    let tx = dt_x + (dt_w.saturating_sub(tw) / 2);
+                    let ty = inner_top + (half_h.saturating_sub(Framebuffer::text_height(time_scale)) / 2);
+                    fb.draw_text(tx, ty, &time_str, value_color.0, value_color.1, value_color.2, time_scale);
+
+                    let date_scale = fit_text_scale(&date_str, dt_w.saturating_sub(border_thickness * 2 + 4), 5);
+                    let dw = Framebuffer::text_width(&date_str, date_scale);
+                    let dx = dt_x + (dt_w.saturating_sub(dw) / 2);
+                    let lower_h = inner_bottom.saturating_sub(inner_top + half_h);
+                    let dy = inner_top + half_h + (lower_h.saturating_sub(Framebuffer::text_height(date_scale)) / 2);
+                    fb.draw_text(dx, dy, &date_str, value_color.0, value_color.1, value_color.2, date_scale);
+                } else if panel.label == "NOW PLAYING" {
+                    let song_area_h = Framebuffer::text_height(song_scale) + border_thickness * 2 + 24;
+                    let bars_area_h = (inner_h - song_area_h).saturating_sub(border_thickness);
+
+                    fb.fill_rect(inner_x, inner_y, inner_w, song_area_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, inner_w.saturating_sub(border_thickness * 2), song_area_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let clip_x0 = inner_x + border_thickness + 4;
+                    let clip_x1 = (inner_x + inner_w).saturating_sub(border_thickness + 4);
+                    let available_width = clip_x1.saturating_sub(clip_x0);
+                    let song_h = Framebuffer::text_height(song_scale);
+                    let song_y = inner_y + (song_area_h.saturating_sub(song_h) / 2);
+                    if available_width > 0 && marquee.tick(&panel.value, available_width, song_scale) {
+                        let loop_text = format!("{}{}", panel.value, MARQUEE_GAP);
+                        let loop_width = Framebuffer::text_width(&loop_text, song_scale) as i64;
+                        let base_x = clip_x0 as i64 - marquee.offset_px as i64;
+                        fb.draw_text_clipped(base_x, song_y, &loop_text, value_color.0, value_color.1, value_color.2, song_scale, clip_x0, clip_x1);
+                        fb.draw_text_clipped(base_x + loop_width, song_y, &loop_text, value_color.0, value_color.1, value_color.2, song_scale, clip_x0, clip_x1);
+                    } else {
+                        let tw = Framebuffer::text_width(&panel.value, song_scale);
+                        let tx = inner_x + (inner_w.saturating_sub(tw) / 2);
+                        fb.draw_text(tx, song_y, &panel.value, value_color.0, value_color.1, value_color.2, song_scale);
+                    }
+
+                    let bar_gap = 2u32;
+                    let total_gap = bar_gap * (bar_heights.len() as u32 + 1);
+                    let bars_w = inner_w.saturating_sub(border_thickness * 2);
+                    let bar_width = (bars_w.saturating_sub(total_gap)) / bar_heights.len() as u32;
+                    let mut bx = inner_x + border_thickness + bar_gap;
+                    for &h in bar_heights {
+                        let bar_h = (bars_area_h as f32 * h).round() as u32;
+                        let bar_y = inner_y + song_area_h + (bars_area_h - bar_h);
+                        let (r, g, b) = level_color(h, color_mode);
+                        fb.fill_rect(bx, bar_y, bar_width, bar_h, r, g, b);
+                        bx += bar_width + bar_gap;
+                    }
+                } else {
+                    let sub_count = if panel.detail.is_empty() { 1 } else { 2 };
+                    let sub_w = (inner_w + border_thickness * (sub_count - 1)) / sub_count;
+                    let sub_h = inner_h.saturating_sub(4);
+
+                    let value_width = Framebuffer::text_width(&panel.value, value_scale);
+                    let value_x = inner_x + (sub_w.saturating_sub(value_width) / 2);
+                    let value_y = inner_y + (sub_h.saturating_sub(value_height) / 2);
+                    fb.fill_rect(inner_x, inner_y, sub_w, sub_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, sub_w.saturating_sub(border_thickness * 2), sub_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                    fb.draw_text(value_x, value_y, &panel.value, value_color.0, value_color.1, value_color.2, value_scale);
+
+                    if !panel.detail.is_empty() {
+                        let detail_x_pos = inner_x + sub_w.saturating_sub(border_thickness);
+                        let detail_width = Framebuffer::text_width(&panel.detail, detail_scale);
+                        let detail_x = detail_x_pos + (sub_w.saturating_sub(detail_width) / 2);
+                        let detail_y = inner_y + (sub_h.saturating_sub(detail_height) / 2);
+                        fb.fill_rect(detail_x_pos, inner_y, sub_w, sub_h, border.0, border.1, border.2);
+                        fb.fill_rect(detail_x_pos + border_thickness, inner_y + border_thickness, sub_w.saturating_sub(border_thickness * 2), sub_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                        fb.draw_text(detail_x, detail_y, &panel.detail, label_color.0, label_color.1, label_color.2, detail_scale);
+                    }
+                }
+
+                idx += 1;
+            }
+        }
+    } else {
+        let side_margin = 16u32;
+        let gap = 10u32;
+        let cols = 3u32;
+        let rows = 2u32;
+        let usable_width = width.saturating_sub(side_margin * 2);
+        let usable_height = area_height.saturating_sub(gap * (rows - 1));
+        let panel_width = (usable_width.saturating_sub(gap * (cols - 1))) / cols;
+        let panel_height = usable_height / rows;
+
+        let value_scale = 5u32;
+        let song_scale = 3u32;
+        let label_scale = 3u32;
+        let detail_scale = 3u32;
+        let label_height = Framebuffer::text_height(label_scale);
+        let detail_height = Framebuffer::text_height(detail_scale);
+        let value_height = Framebuffer::text_height(value_scale);
+
+        struct Panel {
+            label: &'static str,
+            value: String,
+            detail: String,
+        }
+
+        let panels = [
+            Panel { label: "CPU", value: format!("{cpu:.0}%"), detail: String::new() },
+            Panel { label: "GPU", value: gpu_str.clone(), detail: gpu_hw_str.clone() },
+            Panel { label: "MEM", value: format!("{used_mb}MB"), detail: format!("{total_mb}MB") },
+            Panel { label: "ACTIVITY", value: String::new(), detail: String::new() },
+            Panel { label: "DATE TIME", value: volume_str.clone(), detail: format!("{time_str}|{date_str}") },
+            Panel { label: "NOW PLAYING", value: song_str.to_string(), detail: String::new() },
+        ];
+
+        let mut idx = 0;
+        for row in 0..rows {
+            for col in 0..cols {
+                if idx >= panels.len() {
+                    break;
+                }
+                let panel = &panels[idx];
+                let x = side_margin + col * (panel_width + gap);
+                let y = area_top + row * (panel_height + gap);
+                let ph = if row == rows - 1 {
+                    area_top + area_height - y
+                } else {
+                    panel_height
+                };
+
+                fb.fill_rect(x, y, panel_width, ph, border.0, border.1, border.2);
+                fb.fill_rect(
+                    x + border_thickness,
+                    y + border_thickness,
+                    panel_width.saturating_sub(border_thickness * 2),
+                    ph.saturating_sub(border_thickness * 2),
+                    panel_bg.0, panel_bg.1, panel_bg.2,
+                );
+
+                let label_width = Framebuffer::text_width(panel.label, label_scale);
+                let label_x = x + (panel_width.saturating_sub(label_width) / 2);
+                let label_y = y + border_thickness + 4;
+                fb.draw_text(label_x, label_y, panel.label, label_color.0, label_color.1, label_color.2, label_scale);
+
+                let divider_y = label_y + label_height + 4;
+                fb.fill_rect(
+                    x + border_thickness,
+                    divider_y,
+                    panel_width.saturating_sub(border_thickness * 2),
+                    border_thickness,
+                    border.0, border.1, border.2,
+                );
+
+                let inner_x = x;
+                let inner_w = panel_width;
+                let inner_y = divider_y;
+                let inner_h = (y + ph).saturating_sub(inner_y);
+
+                if panel.label == "GPU" {
+                    let usage_w = (inner_w + border_thickness * 2) / 3;
+                    let usage_h = inner_h;
+                    fb.fill_rect(inner_x, inner_y, usage_w, usage_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, usage_w.saturating_sub(border_thickness * 2), usage_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let usage_label = "Usage";
+                    let usage_scale = fit_text_scale(usage_label, usage_w.saturating_sub(border_thickness * 2), detail_scale);
+                    let ulw = Framebuffer::text_width(usage_label, usage_scale);
+                    let ulx = inner_x + (usage_w.saturating_sub(ulw) / 2);
+                    let uly = inner_y + border_thickness + 4;
+                    fb.draw_text(ulx, uly, usage_label, label_color.0, label_color.1, label_color.2, usage_scale);
+
+                    let usage_val_scale = fit_text_scale(&panel.value, usage_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let uvw = Framebuffer::text_width(&panel.value, usage_val_scale);
+                    let uvx = inner_x + (usage_w.saturating_sub(uvw) / 2);
+                    let uvy = inner_y + (usage_h.saturating_sub(Framebuffer::text_height(usage_val_scale)) / 2);
+                    fb.draw_text(uvx, uvy, &panel.value, value_color.0, value_color.1, value_color.2, usage_val_scale);
+
+                    let grid_x = inner_x + usage_w.saturating_sub(border_thickness);
+                    let grid_w = inner_w.saturating_sub(usage_w.saturating_sub(border_thickness));
+                    let sub_cols = 2u32;
+                    let sub_rows = 2u32;
+                    let sub_w = (grid_w + border_thickness * (sub_cols - 1)) / sub_cols;
+                    let sub_h = (inner_h + border_thickness * (sub_rows - 1)) / sub_rows;
+
+                    let gpu_subs = [
+                        ("TEMP", gpu_temp.as_str()),
+                        ("WATT", gpu_watt.as_str()),
+                        ("RPM", gpu_rpm.as_str()),
+                        ("FPS", gpu_fps.as_str()),
+                    ];
+
+                    let mut sub_idx = 0;
+                    for srow in 0..sub_rows {
+                        for scol in 0..sub_cols {
+                            if sub_idx >= gpu_subs.len() {
+                                break;
+                            }
+                            let (sub_label, sub_value) = gpu_subs[sub_idx];
+                            let sx = grid_x + scol * sub_w.saturating_sub(border_thickness);
+                            let sy = inner_y + srow * sub_h.saturating_sub(border_thickness);
+                            let cell_w = if scol + 1 == sub_cols { grid_x + grid_w - sx } else { sub_w };
+                            let cell_h = if srow + 1 == sub_rows { inner_y + inner_h - sy } else { sub_h };
+
+                            fb.fill_rect(sx, sy, cell_w, cell_h, border.0, border.1, border.2);
+                            fb.fill_rect(sx + border_thickness, sy + border_thickness, cell_w.saturating_sub(border_thickness * 2), cell_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                            let sub_lab_scale = fit_text_scale(sub_label, sub_w.saturating_sub(border_thickness * 2), detail_scale);
+                            let slw = Framebuffer::text_width(sub_label, sub_lab_scale);
+                            let slx = sx + (sub_w.saturating_sub(slw) / 2);
+                            let sly = sy + border_thickness + 4;
+                            fb.draw_text(slx, sly, sub_label, label_color.0, label_color.1, label_color.2, sub_lab_scale);
+
+                            let sub_val_scale = fit_text_scale(sub_value, sub_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                            let svw = Framebuffer::text_width(sub_value, sub_val_scale);
+                            let svx = sx + (sub_w.saturating_sub(svw) / 2);
+                            let value_top = sy + border_thickness + 4 + detail_height;
+                            let value_bottom = (sy + sub_h).saturating_sub(border_thickness + 2);
+                            let svy = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(sub_val_scale))) / 2;
+                            fb.draw_text(svx, svy, sub_value, value_color.0, value_color.1, value_color.2, sub_val_scale);
+
+                            sub_idx += 1;
+                        }
+                    }
+                } else if panel.label == "CPU" {
+                    let usage_w = (inner_w + border_thickness * 2) / 3;
+                    let usage_h = inner_h;
+                    fb.fill_rect(inner_x, inner_y, usage_w, usage_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, usage_w.saturating_sub(border_thickness * 2), usage_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let usage_label = "Usage";
+                    let usage_scale = fit_text_scale(usage_label, usage_w.saturating_sub(border_thickness * 2), detail_scale);
+                    let ulw = Framebuffer::text_width(usage_label, usage_scale);
+                    let ulx = inner_x + (usage_w.saturating_sub(ulw) / 2);
+                    let uly = inner_y + border_thickness + 4;
+                    fb.draw_text(ulx, uly, usage_label, label_color.0, label_color.1, label_color.2, usage_scale);
+
+                    let usage_val_scale = fit_text_scale(&panel.value, usage_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let uvw = Framebuffer::text_width(&panel.value, usage_val_scale);
+                    let uvx = inner_x + (usage_w.saturating_sub(uvw) / 2);
+                    let uvy = inner_y + (usage_h.saturating_sub(Framebuffer::text_height(usage_val_scale)) / 2);
+                    fb.draw_text(uvx, uvy, &panel.value, value_color.0, value_color.1, value_color.2, usage_val_scale);
+
+                    let grid_x = inner_x + usage_w.saturating_sub(border_thickness);
+                    let grid_w = inner_w.saturating_sub(usage_w.saturating_sub(border_thickness));
+                    let sub_cols = 2u32;
+                    let sub_rows = 2u32;
+                    let sub_w = (grid_w + border_thickness * (sub_cols - 1)) / sub_cols;
+                    let sub_h = (inner_h + border_thickness * (sub_rows - 1)) / sub_rows;
+
+                    let mut up_val = uptime_str.clone();
+                    let mut up_scale = fit_text_scale(&up_val, sub_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    if up_scale < 2 {
+                        if let Some((head, _)) = up_val.rsplit_once(':') {
+                            let short = head.to_string();
+                            up_val = short;
+                            up_scale = fit_text_scale(&up_val, sub_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                        }
+                    }
+
+                    let cpu_subs = [
+                        ("TEMP", cpu_temp.as_str(), fit_text_scale(&cpu_temp, sub_w.saturating_sub(border_thickness * 2 + 4), value_scale)),
+                        ("WATT", cpu_watt.as_str(), fit_text_scale(&cpu_watt, sub_w.saturating_sub(border_thickness * 2 + 4), value_scale)),
+                        ("FREQ", cpu_freq.as_str(), fit_text_scale(&cpu_freq, sub_w.saturating_sub(border_thickness * 2 + 4), value_scale)),
+                        ("UP", up_val.as_str(), up_scale),
+                    ];
+
+                    let mut sub_idx = 0;
+                    for srow in 0..sub_rows {
+                        for scol in 0..sub_cols {
+                            if sub_idx >= cpu_subs.len() {
+                                break;
+                            }
+                            let (sub_label, sub_value, cell_scale) = cpu_subs[sub_idx];
+                            let sx = grid_x + scol * sub_w.saturating_sub(border_thickness);
+                            let sy = inner_y + srow * sub_h.saturating_sub(border_thickness);
+                            let cell_w = if scol + 1 == sub_cols { grid_x + grid_w - sx } else { sub_w };
+                            let cell_h = if srow + 1 == sub_rows { inner_y + inner_h - sy } else { sub_h };
+
+                            fb.fill_rect(sx, sy, cell_w, cell_h, border.0, border.1, border.2);
+                            fb.fill_rect(sx + border_thickness, sy + border_thickness, cell_w.saturating_sub(border_thickness * 2), cell_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                            let sub_lab_scale = fit_text_scale(sub_label, sub_w.saturating_sub(border_thickness * 2), detail_scale);
+                            let slw = Framebuffer::text_width(sub_label, sub_lab_scale);
+                            let slx = sx + (sub_w.saturating_sub(slw) / 2);
+                            let sly = sy + border_thickness + 4;
+                            fb.draw_text(slx, sly, sub_label, label_color.0, label_color.1, label_color.2, sub_lab_scale);
+
+                            let svw = Framebuffer::text_width(sub_value, cell_scale);
+                            let svx = sx + (sub_w.saturating_sub(svw) / 2);
+                            let value_top = sy + border_thickness + 4 + detail_height;
+                            let value_bottom = (sy + sub_h).saturating_sub(border_thickness + 2);
+                            let svy = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(cell_scale))) / 2;
+                            fb.draw_text(svx, svy, sub_value, value_color.0, value_color.1, value_color.2, cell_scale);
+
+                            sub_idx += 1;
+                        }
+                    }
+                } else if panel.label == "MEM" {
+                    let usage_w = (inner_w + border_thickness * 2) / 3;
+                    let usage_h = inner_h;
+                    fb.fill_rect(inner_x, inner_y, usage_w, usage_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, usage_w.saturating_sub(border_thickness * 2), usage_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let usage_label = "Usage";
+                    let usage_scale = fit_text_scale(usage_label, usage_w.saturating_sub(border_thickness * 2), detail_scale);
+                    let ulw = Framebuffer::text_width(usage_label, usage_scale);
+                    let ulx = inner_x + (usage_w.saturating_sub(ulw) / 2);
+                    let uly = inner_y + border_thickness + 4;
+                    fb.draw_text(ulx, uly, usage_label, label_color.0, label_color.1, label_color.2, usage_scale);
+
+                    let mem_pct_val = if total_mb > 0 { (used_mb as f32 / total_mb as f32) * 100.0 } else { 0.0 };
+                    let usage_val_scale = fit_text_scale(&format!("{mem_pct_val:.0}%"), usage_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let uvw = Framebuffer::text_width(&format!("{mem_pct_val:.0}%"), usage_val_scale);
+                    let uvx = inner_x + (usage_w.saturating_sub(uvw) / 2);
+                    let uvy = inner_y + (usage_h.saturating_sub(Framebuffer::text_height(usage_val_scale)) / 2);
+                    fb.draw_text(uvx, uvy, &format!("{mem_pct_val:.0}%"), value_color.0, value_color.1, value_color.2, usage_val_scale);
+
+                    let grid_x = inner_x + usage_w.saturating_sub(border_thickness);
+                    let grid_w = inner_w.saturating_sub(usage_w.saturating_sub(border_thickness));
+                    let sub_w = grid_w;
+                    let sub_h = (inner_h + border_thickness) / 2;
+
+                    let u_title = "Used";
+                    let u_title_scale = fit_text_scale(u_title, sub_w.saturating_sub(border_thickness * 2 + 4), detail_scale);
+                    let utw = Framebuffer::text_width(u_title, u_title_scale);
+                    let utx = grid_x + (sub_w.saturating_sub(utw) / 2);
+                    fb.fill_rect(grid_x, inner_y, sub_w, sub_h, border.0, border.1, border.2);
+                    fb.fill_rect(grid_x + border_thickness, inner_y + border_thickness, sub_w.saturating_sub(border_thickness * 2), sub_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                    fb.draw_text(utx, inner_y + border_thickness + 4, u_title, label_color.0, label_color.1, label_color.2, u_title_scale);
+
+                    let u_val = format!("{used_mb}MB");
+                    let u_scale = fit_text_scale(&u_val, sub_w.saturating_sub(12), value_scale);
+                    let uvw2 = Framebuffer::text_width(&u_val, u_scale);
+                    let uvx2 = grid_x + (sub_w.saturating_sub(uvw2) / 2);
+                    let u_top = inner_y + border_thickness + 4 + Framebuffer::text_height(u_title_scale) + 6;
+                    let u_bottom = (inner_y + sub_h).saturating_sub(border_thickness + 2);
+                    let uvy2 = u_top + (u_bottom.saturating_sub(u_top + Framebuffer::text_height(u_scale))) / 2;
+                    fb.draw_text(uvx2, uvy2, &u_val, value_color.0, value_color.1, value_color.2, u_scale);
+
+                    let t_y = inner_y + sub_h.saturating_sub(border_thickness);
+                    let t_title = "Total Memory";
+                    let t_title_scale = fit_text_scale(t_title, sub_w.saturating_sub(border_thickness * 2 + 4), detail_scale);
+                    let ttw = Framebuffer::text_width(t_title, t_title_scale);
+                    let ttx = grid_x + (sub_w.saturating_sub(ttw) / 2);
+                    let t_h = (inner_h.saturating_sub(sub_h)) + border_thickness;
+                    fb.fill_rect(grid_x, t_y, sub_w, t_h, border.0, border.1, border.2);
+                    fb.fill_rect(grid_x + border_thickness, t_y + border_thickness, sub_w.saturating_sub(border_thickness * 2), t_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                    fb.draw_text(ttx, t_y + border_thickness + 4, t_title, label_color.0, label_color.1, label_color.2, t_title_scale);
+
+                    let t_val = format!("{total_mb}MB");
+                    let t_scale = fit_text_scale(&t_val, sub_w.saturating_sub(12), value_scale);
+                    let tvw = Framebuffer::text_width(&t_val, t_scale);
+                    let tvx = grid_x + (sub_w.saturating_sub(tvw) / 2);
+                    let t_top = t_y + border_thickness + 4 + Framebuffer::text_height(t_title_scale) + 6;
+                    let t_bottom = (t_y + sub_h).saturating_sub(border_thickness + 2);
+                    let tvy = t_top + (t_bottom.saturating_sub(t_top + Framebuffer::text_height(t_scale))) / 2;
+                    fb.draw_text(tvx, tvy, &t_val, value_color.0, value_color.1, value_color.2, t_scale);
+                } else if panel.label == "ACTIVITY" {
+                    let title_h = border_thickness + detail_height + 8;
+                    let sub_w = (inner_w + border_thickness) / 2;
+                    let sub_h = (inner_h.saturating_sub(title_h) + border_thickness) / 2;
+
+                    let net_title = "NET";
+                    let net_tw = Framebuffer::text_width(net_title, detail_scale);
+                    let net_tx = inner_x + (sub_w.saturating_sub(net_tw) / 2);
+                    let net_ty = inner_y + border_thickness + 4;
+                    fb.draw_text(net_tx, net_ty, net_title, label_color.0, label_color.1, label_color.2, detail_scale);
+
+                    let disk_title = "DISK";
+                    let disk_tw = Framebuffer::text_width(disk_title, detail_scale);
+                    let disk_tx = inner_x + sub_w.saturating_sub(border_thickness) + (sub_w.saturating_sub(disk_tw) / 2);
+                    let disk_ty = inner_y + border_thickness + 4;
+                    fb.draw_text(disk_tx, disk_ty, disk_title, label_color.0, label_color.1, label_color.2, detail_scale);
+
+                    let net_cells = [
+                        ("DL", format!("{net_down:.0} KB/s")),
+                        ("UP", format!("{net_up:.0} KB/s")),
+                    ];
+                    let disk_cells = [
+                        ("READ", format!("{disk_read:.1} MB/s")),
+                        ("Write", format!("{disk_write:.1} MB/s")),
+                    ];
+
+                    for srow in 0..2u32 {
+                        let sy = inner_y + title_h + srow * sub_h.saturating_sub(border_thickness);
+
+                        let (n_label, n_val) = &net_cells[srow as usize];
+                        let sx = inner_x;
+                        let n_cell_h = if srow == 1 { inner_y + inner_h - sy } else { sub_h };
+                        fb.fill_rect(sx, sy, sub_w, n_cell_h, border.0, border.1, border.2);
+                        fb.fill_rect(sx + border_thickness, sy + border_thickness, sub_w.saturating_sub(border_thickness * 2), n_cell_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                        let clw = Framebuffer::text_width(n_label, detail_scale);
+                        let clx = sx + (sub_w.saturating_sub(clw) / 2);
+                        let cly = sy + border_thickness + 4;
+                        fb.draw_text(clx, cly, n_label, label_color.0, label_color.1, label_color.2, detail_scale);
+                        let n_scale = fit_text_scale(n_val, sub_w.saturating_sub(12), value_scale.saturating_sub(2));
+                        let cvw = Framebuffer::text_width(n_val, n_scale);
+                        let cvx = sx + (sub_w.saturating_sub(cvw) / 2);
+                        let value_top = sy + border_thickness + 4 + detail_height + 6;
+                        let value_bottom = (sy + sub_h).saturating_sub(border_thickness + 2);
+                        let cvy = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(n_scale))) / 2;
+                        fb.draw_text(cvx, cvy, n_val, value_color.0, value_color.1, value_color.2, n_scale);
+
+                        let (d_label, d_val) = &disk_cells[srow as usize];
+                        let sx2 = inner_x + sub_w.saturating_sub(border_thickness);
+                        let d_cell_w = inner_x + inner_w - sx2;
+                        let d_cell_h = if srow == 1 { inner_y + inner_h - sy } else { sub_h };
+                        fb.fill_rect(sx2, sy, d_cell_w, d_cell_h, border.0, border.1, border.2);
+                        fb.fill_rect(sx2 + border_thickness, sy + border_thickness, d_cell_w.saturating_sub(border_thickness * 2), d_cell_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                        let clw2 = Framebuffer::text_width(d_label, detail_scale);
+                        let clx2 = sx2 + (sub_w.saturating_sub(clw2) / 2);
+                        let cly2 = sy + border_thickness + 4;
+                        fb.draw_text(clx2, cly2, d_label, label_color.0, label_color.1, label_color.2, detail_scale);
+                        let d_scale = fit_text_scale(d_val, sub_w.saturating_sub(12), value_scale.saturating_sub(2));
+                        let cvw2 = Framebuffer::text_width(d_val, d_scale);
+                        let cvx2 = sx2 + (sub_w.saturating_sub(cvw2) / 2);
+                        let value_top = sy + border_thickness + 4 + detail_height + 6;
+                        let value_bottom = (sy + sub_h).saturating_sub(border_thickness + 2);
+                        let cvy2 = value_top + (value_bottom.saturating_sub(value_top + Framebuffer::text_height(d_scale))) / 2;
+                        fb.draw_text(cvx2, cvy2, d_val, value_color.0, value_color.1, value_color.2, d_scale);
+                    }
+                } else if panel.label == "DATE TIME" {
+                    let usage_w = (inner_w + border_thickness * 2) / 3;
+                    let usage_h = inner_h;
+                    fb.fill_rect(inner_x, inner_y, usage_w, usage_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, usage_w.saturating_sub(border_thickness * 2), usage_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let usage_label = "VOL";
+                    let usage_scale = fit_text_scale(usage_label, usage_w.saturating_sub(border_thickness * 2), detail_scale);
+                    let ulw = Framebuffer::text_width(usage_label, usage_scale);
+                    let ulx = inner_x + (usage_w.saturating_sub(ulw) / 2);
+                    let uly = inner_y + border_thickness + 4;
+                    fb.draw_text(ulx, uly, usage_label, label_color.0, label_color.1, label_color.2, usage_scale);
+
+                    let vol_pct = match volume {
+                        Some((pct, _)) => format!("{pct:.0}%"),
+                        None => "N/A".to_string(),
+                    };
+                    let usage_val_scale = fit_text_scale(&vol_pct, usage_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let uvw = Framebuffer::text_width(&vol_pct, usage_val_scale);
+                    let uvx = inner_x + (usage_w.saturating_sub(uvw) / 2);
+                    let uvy = inner_y + (usage_h.saturating_sub(Framebuffer::text_height(usage_val_scale)) / 2);
+                    fb.draw_text(uvx, uvy, &vol_pct, value_color.0, value_color.1, value_color.2, usage_val_scale);
+
+                    let grid_x = inner_x + usage_w.saturating_sub(border_thickness);
+                    let grid_w = inner_w.saturating_sub(usage_w.saturating_sub(border_thickness));
+                    let sub_w = grid_w;
+                    let sub_h = (inner_h + border_thickness) / 2;
+
+                    let time_scale = fit_text_scale(&time_str, sub_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let time_val = time_str.clone();
+                    let tw = Framebuffer::text_width(&time_val, time_scale);
+                    let tx = grid_x + (sub_w.saturating_sub(tw) / 2);
+                    let ty = inner_y + (sub_h.saturating_sub(Framebuffer::text_height(time_scale)) / 2);
+                    fb.fill_rect(grid_x, inner_y, sub_w, sub_h, border.0, border.1, border.2);
+                    fb.fill_rect(grid_x + border_thickness, inner_y + border_thickness, sub_w.saturating_sub(border_thickness * 2), sub_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                    fb.draw_text(tx, ty, &time_val, value_color.0, value_color.1, value_color.2, time_scale);
+
+                    let date_scale = fit_text_scale(&date_str, sub_w.saturating_sub(border_thickness * 2 + 4), value_scale);
+                    let date_val = date_str.clone();
+                    let dw = Framebuffer::text_width(&date_val, date_scale);
+                    let dx = grid_x + (sub_w.saturating_sub(dw) / 2);
+                    let dy = inner_y + sub_h.saturating_sub(border_thickness) + (sub_h.saturating_sub(Framebuffer::text_height(date_scale)) / 2);
+                    let date_box_h = (inner_h.saturating_sub(sub_h)) + border_thickness;
+                    fb.fill_rect(grid_x, inner_y + sub_h.saturating_sub(border_thickness), sub_w, date_box_h, border.0, border.1, border.2);
+                    fb.fill_rect(grid_x + border_thickness, inner_y + sub_h, sub_w.saturating_sub(border_thickness * 2), date_box_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                    fb.draw_text(dx, dy, &date_val, value_color.0, value_color.1, value_color.2, date_scale);
+                } else if panel.label == "NOW PLAYING" {
+                    let song_area_h = inner_h / 2;
+                    let bars_area_h = (inner_h - song_area_h).saturating_sub(border_thickness);
+
+                    fb.fill_rect(inner_x, inner_y, inner_w, song_area_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, inner_w.saturating_sub(border_thickness * 2), song_area_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+
+                    let clip_x0 = inner_x + border_thickness + 4;
+                    let clip_x1 = (inner_x + inner_w).saturating_sub(border_thickness + 4);
+                    let available_width = clip_x1.saturating_sub(clip_x0);
+                    let song_h = Framebuffer::text_height(song_scale);
+                    let song_y = inner_y + (song_area_h.saturating_sub(song_h) / 2);
+                    if available_width > 0 && marquee.tick(&panel.value, available_width, song_scale) {
+                        let loop_text = format!("{}{}", panel.value, MARQUEE_GAP);
+                        let loop_width = Framebuffer::text_width(&loop_text, song_scale) as i64;
+                        let base_x = clip_x0 as i64 - marquee.offset_px as i64;
+                        fb.draw_text_clipped(base_x, song_y, &loop_text, value_color.0, value_color.1, value_color.2, song_scale, clip_x0, clip_x1);
+                        fb.draw_text_clipped(base_x + loop_width, song_y, &loop_text, value_color.0, value_color.1, value_color.2, song_scale, clip_x0, clip_x1);
+                    } else {
+                        let tw = Framebuffer::text_width(&panel.value, song_scale);
+                        let tx = inner_x + (inner_w.saturating_sub(tw) / 2);
+                        fb.draw_text(tx, song_y, &panel.value, value_color.0, value_color.1, value_color.2, song_scale);
+                    }
+
+                    let bar_gap = 2u32;
+                    let total_gap = bar_gap * (bar_heights.len() as u32 + 1);
+                    let bars_w = inner_w.saturating_sub(border_thickness * 2);
+                    let bar_width = (bars_w.saturating_sub(total_gap)) / bar_heights.len() as u32;
+                    let mut bx = inner_x + border_thickness + bar_gap;
+                    for &h in bar_heights {
+                        let bar_h = (bars_area_h as f32 * h).round() as u32;
+                        let bar_y = inner_y + song_area_h + (bars_area_h - bar_h);
+                        let (r, g, b) = level_color(h, color_mode);
+                        fb.fill_rect(bx, bar_y, bar_width, bar_h, r, g, b);
+                        bx += bar_width + bar_gap;
+                    }
+                } else {
+                    let sub_count = if panel.detail.is_empty() { 1 } else { 2 };
+                    let sub_w = (inner_w + border_thickness * (sub_count - 1)) / sub_count;
+                    let sub_h = inner_h.saturating_sub(4);
+
+                    let value_width = Framebuffer::text_width(&panel.value, value_scale);
+                    let value_x = inner_x + (sub_w.saturating_sub(value_width) / 2);
+                    let value_y = inner_y + (sub_h.saturating_sub(value_height) / 2);
+                    fb.fill_rect(inner_x, inner_y, sub_w, sub_h, border.0, border.1, border.2);
+                    fb.fill_rect(inner_x + border_thickness, inner_y + border_thickness, sub_w.saturating_sub(border_thickness * 2), sub_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                    fb.draw_text(value_x, value_y, &panel.value, value_color.0, value_color.1, value_color.2, value_scale);
+
+                    if !panel.detail.is_empty() {
+                        let detail_x_pos = inner_x + sub_w.saturating_sub(border_thickness);
+                        let detail_width = Framebuffer::text_width(&panel.detail, detail_scale);
+                        let detail_x = detail_x_pos + (sub_w.saturating_sub(detail_width) / 2);
+                        let detail_y = inner_y + (sub_h.saturating_sub(detail_height) / 2);
+                        fb.fill_rect(detail_x_pos, inner_y, sub_w, sub_h, border.0, border.1, border.2);
+                        fb.fill_rect(detail_x_pos + border_thickness, inner_y + border_thickness, sub_w.saturating_sub(border_thickness * 2), sub_h.saturating_sub(border_thickness * 2), panel_bg.0, panel_bg.1, panel_bg.2);
+                        fb.draw_text(detail_x, detail_y, &panel.detail, label_color.0, label_color.1, label_color.2, detail_scale);
+                    }
+                }
+
+                idx += 1;
+            }
         }
     }
 }
@@ -1236,17 +2224,6 @@ fn draw_game_dashboard(
     }
 }
 
-/// Gambar jam digital besar di tengah area yang biasanya dipakai bar EQ,
-/// dipanggil sebagai pengganti `draw_bars` saat lagi diam/idle (bar EQ kosong
-/// nggak ada gunanya digambar terus). Baris info kecil (`draw_status_lines`)
-/// tetap digambar terpisah seperti biasa, tidak terpengaruh fungsi ini.
-/// Skala teks terbesar di mana `text` masih muat dalam `max_width`, dibatasi
-/// oleh `max_scale`.
-///
-/// Dipakai di mode portrait, yang lebannya hanya 462 px. `text_width` grows
-/// linear dengan skala (`karakter * (GLYPH_WIDTH + 1) * scale`), jadi skalanya
-/// bisa dihitung balik tanpa perlu tahu konstanta font-nya: advance per
-/// karakter diambil dari pemanggilan `text_width` pada skala 1.
 /// Isi framebuffer dengan background, atau layar polos kalau tidak ada.
 ///
 /// Dipakai untuk framebuffer "dasar" (landscape maupun portrait) SEBELUM
@@ -1279,6 +2256,13 @@ fn readable(
     }
 }
 
+/// Skala teks terbesar di mana `text` masih muat dalam `max_width`, dibatasi
+/// oleh `max_scale`.
+///
+/// Dipakai di mode portrait, yang lebarnya hanya 462 px. `text_width` tumbuh
+/// linear dengan skala (`karakter * (GLYPH_WIDTH + 1) * scale`), jadi skalanya
+/// bisa dihitung balik tanpa perlu tahu konstanta font-nya: advance per
+/// karakter diambil dari pemanggilan `text_width` pada skala 1.
 fn fit_text_scale(text: &str, max_width: u32, max_scale: u32) -> u32 {
     let chars = text.chars().count().max(1) as u32;
     let advance = Framebuffer::text_width("x", 1).max(1);
@@ -1286,6 +2270,10 @@ fn fit_text_scale(text: &str, max_width: u32, max_scale: u32) -> u32 {
     max_scale.min(fit_by_width).max(1)
 }
 
+/// Gambar jam digital besar di tengah area yang biasanya dipakai bar EQ,
+/// dipanggil sebagai pengganti `draw_bars` saat lagi diam/idle (bar EQ kosong
+/// nggak ada gunanya digambar terus). Baris info kecil (`draw_status_lines`)
+/// tetap digambar terpisah seperti biasa, tidak terpengaruh fungsi ini.
 fn draw_idle_clock(
     fb: &mut Framebuffer,
     color_mode: ColorMode,
@@ -1315,8 +2303,8 @@ fn draw_idle_clock(
         // ada supaya locale dengan nama hari/bulan lebih panjang tidak meluap
         // lagi di kemudian hari — di sini cuma perlu dikecilkan dari 10 ke 9.
         let avail = width.saturating_sub(16);
-        let time_scale = fit_text_scale(&time_str, avail, 10);
-        let date_scale = fit_text_scale(&date_str, avail, 3);
+        let time_scale = fit_text_scale(&time_str, avail, 8);
+        let date_scale = fit_text_scale(&date_str, avail, 2);
 
         let time_width = Framebuffer::text_width(&time_str, time_scale);
         let time_height = Framebuffer::text_height(time_scale);
@@ -1629,5 +2617,47 @@ fn format_uptime(total_secs: u64) -> String {
         format!("{}D{:02}:{:02}:{:02}", days, hours, minutes, seconds)
     } else {
         format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    }
+}
+
+#[cfg(test)]
+mod grid_preview {
+    use super::*;
+
+    #[test]
+    fn render_previews() {
+        let gpu_data = gpu_amd::GpuAmdData::default();
+        let mut marquee = Marquee::new();
+        let sys = System::new();
+
+        let mut fb = Framebuffer::new(Resolution::new(462, 1920));
+        draw_grid_layout(
+            &mut fb, &sys, None,
+            Some(42.0), &gpu_data,
+            (1024.0, 256.0), (12.5, 4.2),
+            Some((100.0, false)),
+            Some(55.0), Some(65.0), Some(4200),
+            Some("Some Song Title - Artist Name"),
+            &mut marquee,
+            ColorMode::Default,
+            Rotation::Deg90,
+            &[0.1, 0.3, 0.5, 0.9, 0.6, 0.4, 0.7],
+        );
+        std::fs::write("target/preview_portrait.png", png_save::encode(&fb)).unwrap();
+
+        let mut fb2 = Framebuffer::new(Resolution::new(1920, 462));
+        draw_grid_layout(
+            &mut fb2, &sys, None,
+            Some(42.0), &gpu_data,
+            (1024.0, 256.0), (12.5, 4.2),
+            Some((100.0, false)),
+            Some(55.0), Some(65.0), Some(4200),
+            Some("Some Song Title - Artist Name"),
+            &mut marquee,
+            ColorMode::Default,
+            Rotation::Deg0,
+            &[0.1, 0.3, 0.5, 0.9, 0.6, 0.4, 0.7],
+        );
+        std::fs::write("target/preview_landscape.png", png_save::encode(&fb2)).unwrap();
     }
 }

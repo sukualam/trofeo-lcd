@@ -8,9 +8,21 @@ software.** Audio visualizer + system info monitor for the
 The driver was rewritten byte-for-byte from
 [thermalright-trcc-linux](https://github.com/Lexonight1/thermalright-trcc-linux).
 
-The display **adapts automatically to what your computer is doing** — no
-manual switching needed. The Trofeo LCD shows one of these views below
-depending on the moment:
+The **default view is a grid dashboard** that packs everything into panels
+at a glance — CPU, GPU, RAM, network & disk activity, date/time/volume and
+a now-playing visualizer. It fills the screen in either orientation:
+
+**Landscape** (`--rotate 0` or `180`, 1920×462):
+
+![Grid dashboard — landscape](img/new_landscape.png)
+
+**Portrait** (`--rotate 90` or `270`, 462×1920):
+
+![Grid dashboard — portrait](img/new_portrait.png)
+
+Pass **`--classic`** to use the old adaptive views instead — the display
+**adapts automatically to what your computer is doing**, no manual
+switching needed:
 
 **Idle** — audio is quiet, so the EQ bars are low and the top bar shows
 system info: CPU usage & real-time frequency, RAM, uptime, clock and date.
@@ -29,6 +41,9 @@ system status (CPU/GPU/RAM/temp) stays readable while playing.
 
 ## Features
 
+- **Grid dashboard** (default): panels for CPU, GPU, RAM, network/disk
+  activity, date/time/volume and now-playing, in landscape or portrait
+  (`--rotate`).
 - EQ bars (48) from currently playing audio (WASAPI loopback on Windows,
   PulseAudio/PipeWire on Linux, Core Audio process tap on macOS), colored
   green→yellow→red.
@@ -68,6 +83,7 @@ those two fields show `N/A` and everything else works.
 | `--background <PATH>` | Show a PNG/BMP/JPEG image behind the text (cropped to fit) | off |
 | `--background-dim <0-100>` | Darken that image once at load so the text stays readable — free, no per-frame cost | `15` |
 | `--rotate <DEG>` | Rotate the screen: 0, 90, 180 or 270 | `0` |
+| `--classic` | Use the classic adaptive views (EQ bars / idle clock / game dashboard) instead of the grid dashboard | grid dashboard |
 | `--no-deepcool` | Turn off DeepCool integration | enabled |
 | `--deepcool-update-ms` | DeepCool send interval (100–2000 ms) | `1000` |
 | `--openrgb-device <NAME>` | Sync color with an OpenRGB device | disabled |
